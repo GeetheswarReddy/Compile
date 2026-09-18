@@ -65,7 +65,13 @@ def generation_state_machine_definition(
                 "Choices": [
                     {"Variable": "$.status", "StringEquals": "accepted", "Next": "Succeed"},
                     {"Variable": "$.status", "StringEquals": "stale", "Next": "Stale"},
-                    {"Variable": "$.status", "StringEquals": "retry", "Next": "NextAttempt"},
+                    {
+                        "And": [
+                            {"Variable": "$.status", "StringEquals": "retry"},
+                            {"Variable": "$.attemptState.attempt", "NumericLessThan": MAX_CANDIDATES},
+                        ],
+                        "Next": "NextAttempt",
+                    },
                 ],
                 "Default": "Fallback",
             },

@@ -1,0 +1,344 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Compile adaptive placement-preparation demo infrastructure.
+
+Globals:
+  Function:
+    Runtime: python3.12
+    MemorySize: 256
+    Timeout: 10
+    CodeUri: ..
+    Environment:
+      Variables:
+        LEARNERS_TABLE: !Ref LearnersTable
+        MASTERY_TABLE: !Ref MasteryTable
+        QUESTIONS_TABLE: !Ref QuestionsTable
+        ATTEMPTS_TABLE: !Ref AttemptsTable
+        TRACE_TABLE: !Ref TraceTable
+        REFLECTIONS_TABLE: !Ref ReflectionsTable
+        REFLECTION_TABLE_NAME: !Ref ReflectionsTable
+        PREPARED_QUESTIONS_TABLE: !Ref PreparedQuestionsTable
+        REFLECTION_BUCKET: !Ref ReflectionBucket
+        S3_BUCKET: !Ref ReflectionBucket
+        BEDROCK_MODEL_ID: !Ref BedrockModelId
+    Tracing: PassThrough
+
+Parameters:
+  BedrockModelId:
+    Type: String
+    Default: anthropic.claude-3-haiku-20240307-v1:0
+    Description: Bedrock model identifier enabled in the deployment Region.
+
+Resources:
+  Api:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: v1
+      EndpointConfiguration: REGIONAL
+      Cors:
+        AllowMethods: "'GET,POST,DELETE,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Learner-Id'"
+        AllowOrigin: "'*'"
+
+  LearnersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: learnerId, AttributeType: S}]
+      KeySchema: [{AttributeName: learnerId, KeyType: HASH}]
+
+  MasteryTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: learnerId, AttributeType: S}
+        - {AttributeName: topic, AttributeType: S}
+      KeySchema:
+        - {AttributeName: learnerId, KeyType: HASH}
+        - {AttributeName: topic, KeyType: RANGE}
+
+  QuestionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: questionId, AttributeType: S}]
+      KeySchema: [{AttributeName: questionId, KeyType: HASH}]
+
+  AttemptsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: learnerId, AttributeType: S}
+        - {AttributeName: questionId, AttributeType: S}
+      KeySchema:
+        - {AttributeName: learnerId, KeyType: HASH}
+        - {AttributeName: questionId, KeyType: RANGE}
+
+  TraceTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: learnerId, AttributeType: S}
+        - {AttributeName: traceId, AttributeType: S}
+      KeySchema:
+        - {AttributeName: learnerId, KeyType: HASH}
+        - {AttributeName: traceId, KeyType: RANGE}
+
+  ReflectionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: learnerId, AttributeType: S}
+        - {AttributeName: questionId, AttributeType: S}
+      KeySchema:
+        - {AttributeName: learnerId, KeyType: HASH}
+        - {AttributeName: questionId, KeyType: RANGE}
+
+  PreparedQuestionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: learnerTopic, AttributeType: S}
+        - {AttributeName: questionId, AttributeType: S}
+      KeySchema:
+        - {AttributeName: learnerTopic, KeyType: HASH}
+        - {AttributeName: questionId, KeyType: RANGE}
+
+  ReflectionBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireReflectionAudioAfter30Days
+            Status: Enabled
+            Prefix: reflections/
+            ExpirationInDays: 30
+
+  SeedBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  ExecutionRunnerPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Least-privilege data access for execution; no network actions.
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: ReadQuestions
+            Effect: Allow
+            Action: [dynamodb:GetItem, dynamodb:Query]
+            Resource: !GetAtt QuestionsTable.Arn
+          - Sid: ReadAndWriteExecutionState
+            Effect: Allow
+            Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem]
+            Resource:
+              - !GetAtt LearnersTable.Arn
+              - !GetAtt MasteryTable.Arn
+              - !GetAtt AttemptsTable.Arn
+              - !GetAtt TraceTable.Arn
+          - Sid: WriteLogs
+            Effect: Allow
+            Action: [logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents]
+            Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*
+
+  ApiAdapterPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Data access for API Gateway adapters.
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:DeleteItem, dynamodb:Query, dynamodb:Scan]
+            Resource:
+              - !GetAtt LearnersTable.Arn
+              - !GetAtt MasteryTable.Arn
+              - !GetAtt QuestionsTable.Arn
+              - !GetAtt AttemptsTable.Arn
+              - !GetAtt TraceTable.Arn
+              - !GetAtt ReflectionsTable.Arn
+              - !GetAtt PreparedQuestionsTable.Arn
+
+  ExecutionRunnerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: backend.api_adapters.run_and_check
+      FunctionName: !Sub ${AWS::StackName}-execution-runner
+      Policies: [!Ref ExecutionRunnerPolicy]
+      Events:
+        RunCheck: {Type: Api, Properties: {RestApiId: !Ref Api, Path: /run-check, Method: post}}
+
+  InitLearnerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: backend.api_adapters.init_learner
+      Policies: [!Ref ApiAdapterPolicy]
+      Events:
+        Init: {Type: Api, Properties: {RestApiId: !Ref Api, Path: /learner/init, Method: post}}
+
+  BaselineNextFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: backend.api_adapters.baseline_next
+      Policies: [!Ref ApiAdapterPolicy]
+      Events:
+        Next: {Type: Api, Properties: {RestApiId: !Ref Api, Path: /baseline/next, Method: get}}
+
+  BaselineSubmitFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: backend.api_adapters.baseline_submit
+      Policies: [!Ref ApiAdapterPolicy]
+      Events:
+        Submit: {Type: Api, Properties: {RestApiId: !Ref Api, Path: /baseline/submit, Method: post}}
+
+  NextQuestionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: backend.api_adapters.next_question
+      Policies: [!Ref ApiAdapterPolicy]
+      Events:
+        Next: {Type: Api, Properties: {RestApiId: !Ref Api, Path: '/topic/{topicId}/next-question', Method: get}}
+
+  GenerateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: backend.api_adapters.generate
+      Environment:
+        Variables:
+          GENERATION_STATE_MACHINE_ARN: !Sub arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine/${AWS::StackName}-generation
+      Policies:
+        - !Ref ApiAdapterPolicy
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action: states:StartExecution
+              Resource: !Ref GenerationStateMachine
+            - Effect: Allow
+              Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem]
+              Resource: !GetAtt LearnersTable.Arn
+      Events:
+        Generate: {Type: Api, Properties: {RestApiId: !Ref Api, Path: /generate, Method: post}}
+
+  HintFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: backend.api_adapters.next_hint
+      Policies: [!Ref ApiAdapterPolicy]
+      Events:
+        Hint: {Type: Api, Properties: {RestApiId: !Ref Api, Path: /hint, Method: post}}
+
+  ReflectionCreateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: backend.api_adapters.create_reflection
+      Policies:
+        - !Ref ApiAdapterPolicy
+        - DynamoDBCrudPolicy: {TableName: !Ref ReflectionsTable}
+        - S3CrudPolicy: {BucketName: !Ref ReflectionBucket}
+      Events:
+        Create: {Type: Api, Properties: {RestApiId: !Ref Api, Path: /reflection, Method: post}}
+
+  ReflectionDeleteFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: backend.api_adapters.delete_reflection
+      Policies:
+        - !Ref ApiAdapterPolicy
+        - DynamoDBCrudPolicy: {TableName: !Ref ReflectionsTable}
+        - S3CrudPolicy: {BucketName: !Ref ReflectionBucket}
+      Events:
+        Delete: {Type: Api, Properties: {RestApiId: !Ref Api, Path: '/reflection/{questionId}', Method: delete}}
+
+  DemoTraceFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: backend.api_adapters.demo_trace
+      Policies: [!Ref ApiAdapterPolicy]
+      Events:
+        Trace: {Type: Api, Properties: {RestApiId: !Ref Api, Path: /demo-trace, Method: get}}
+
+  GenerateCandidateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: backend.generation_handlers.generate_candidate
+      Timeout: 3
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action: bedrock:Converse
+              Resource: !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}
+
+  HandleGeneratedCandidateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: backend.generation_handlers.handle_generated_candidate
+      Timeout: 3
+      Policies:
+        - DynamoDBCrudPolicy: {TableName: !Ref PreparedQuestionsTable}
+        - DynamoDBReadPolicy: {TableName: !Ref QuestionsTable}
+        - DynamoDBCrudPolicy: {TableName: !Ref MasteryTable}
+
+  GenerationStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Type: STANDARD
+      Name: !Sub ${AWS::StackName}-generation
+      DefinitionUri: statemachines/generation.asl.json
+      DefinitionSubstitutions:
+        GenerateCandidateArn: !GetAtt GenerateCandidateFunction.Arn
+        HandleGeneratedCandidateArn: !GetAtt HandleGeneratedCandidateFunction.Arn
+      Policies:
+        - LambdaInvokePolicy: {FunctionName: !Ref GenerateCandidateFunction}
+        - LambdaInvokePolicy: {FunctionName: !Ref HandleGeneratedCandidateFunction}
+
+  SeedDeployFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: backend.seed_deploy.seed
+      Timeout: 60
+      Policies:
+        - DynamoDBWritePolicy: {TableName: !Ref QuestionsTable}
+
+  SeededQuestions:
+    Type: Custom::SeededQuestions
+    DependsOn: SeedDeployFunction
+    Properties:
+      ServiceToken: !GetAtt SeedDeployFunction.Arn
+
+Outputs:
+  ApiBaseUrl:
+    Description: API Gateway REST base URL for the Amplify SPA.
+    Value: !Sub https://${Api}.execute-api.${AWS::Region}.${AWS::URLSuffix}/v1
+  FrontendApiBaseUrl:
+    Description: Set this value as VITE_API_BASE_URL in the frontend host.
+    Value: !Sub https://${Api}.execute-api.${AWS::Region}.${AWS::URLSuffix}/v1
+  ApiId: {Value: !Ref Api}
+  ReflectionBucketName: {Value: !Ref ReflectionBucket}
+  SeedBucketName: {Value: !Ref SeedBucket}
+  GenerationStateMachineArn: {Value: !Ref GenerationStateMachine}

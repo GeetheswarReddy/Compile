@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import CodeEditor from './CodeEditor';
 import { usePractice } from './usePractice';
 import './practice.css';
@@ -13,10 +13,15 @@ function displayTopic(topicId, question) {
   return question?.topic || topicNames[topicId] || topicId;
 }
 
-export default function PracticeScreen({ topicId }) {
+export default function PracticeScreen({ topicId, onQuestionIdChange }) {
   const practice = usePractice(topicId);
   const { question, verdict, readOnly, error, loading, submitting, generating } = practice;
   const techniqueTag = question?.techniqueTag || question?.technique;
+
+  useEffect(() => {
+    onQuestionIdChange?.(question?.questionId || '');
+    return () => onQuestionIdChange?.('');
+  }, [onQuestionIdChange, question?.questionId]);
 
   return (
     <main className="practice-screen">

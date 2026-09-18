@@ -1,0 +1,21 @@
+version: 1
+frontend:
+  phases:
+    preBuild:
+      commands:
+        - npm ci
+    build:
+      commands:
+        - npm run build
+  artifacts:
+    baseDirectory: dist
+    files:
+      - '**/*'
+  cache:
+    paths:
+      - node_modules/**/*
+  env:
+    variables:
+      # Configure API_BASE_URL in Amplify with the ApiBaseUrl SAM output.
+      VITE_API_BASE_URL: $API_BASE_URL
+      VITE_DEMO_TRACE: $DEMO_TRACE

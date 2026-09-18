@@ -53,24 +53,19 @@ def _candidate_value(candidate: Any) -> Any:
     raise ValueError("candidate must be a Question or JSON object")
 
 
-def _increment_failure(failure_counter: Any, topic: Topic) -> int:
-    if failure_counter is None:
-        return 0
-    for method in ("increment", "incr", "add_failure"):
-        if hasattr(failure_counter, method):
-            return int(getattr(failure_counter, method)(topic))
-    if isinstance(failure_counter, dict):
-        key = topic.value
-        failure_counter[key] = int(failure_counter.get(key, 0)) + 1
-        return failure_counter[key]
-    raise TypeError("failure_counter must provide increment(topic)")
-
-
-def _fallback(learner_id: str, topic: Topic, mastery_repo: Any, question_repo: Any, attempt_repo: Any, failure_counter: Any) -> dict[str, Any]:
-    _increment_failure(failure_counter, topic)
+def _fallback(learner_id: str, topic: Topic, mastery_repo: Any, question_repo: Any) -> dict[str, Any]:
+    if mastery_repo is None or not hasattr(mastery_repo, "increment_generation_failure"):
+        raise RuntimeError("mastery_repository.increment_generation_failure is required")
+    mastery_repo.increment_generation_failure(learner_id, topic)
     mastery = mastery_repo.get(learner_id, topic) if mastery_repo is not None else None
     score = mastery.score if mastery is not None else 1
-    questions = question_repo.all() if hasattr(question_repo, "all") else question_repo.list()
+    if hasattr(question_repo, "all"):
+        questions = question_repo.all()
+    elif hasattr(question_repo, "list"):
+        questions = question_repo.list()
+    else:
+        from .repositories import _question_from_item
+        questions = [_question_from_item(item) for item in question_repo.table.scan().get("Items", [])]
     eligible = [q for q in questions if q.topic is topic and q.provenance in (Provenance.SEEDED, Provenance.CURATED)]
     if not eligible:
         raise LookupError("no curated fallback question exists")
@@ -84,8 +79,6 @@ def handle_generated_candidate(
     prepared_repository: Any | None = None,
     question_repository: Any | None = None,
     mastery_repository: Any | None = None,
-    attempt_repository: Any | None = None,
-    failure_counter: Any = None,
     verifier: Any = verify_question,
     now: datetime | None = None,
 ) -> dict[str, Any]:
@@ -106,7 +99,12 @@ def handle_generated_candidate(
         raise ValueError("learnerId is required")
     current = _now(now)
     if event.get("fallback") is True:
-        return _fallback(learner_id, topic, mastery_repository, question_repository, attempt_repository, failure_counter)
+        if question_repository is None or mastery_repository is None:
+            from .dependencies import compose_dependencies
+            deps = compose_dependencies()
+            question_repository = question_repository or deps["question_repository"]
+            mastery_repository = mastery_repository or deps["mastery_repository"]
+        return _fallback(learner_id, topic, mastery_repository, question_repository)
     deadline = event.get("deadline") or event.get("generationDeadline")
     if isinstance(deadline, str):
         deadline = datetime.fromisoformat(deadline)
@@ -118,12 +116,19 @@ def handle_generated_candidate(
         if question.topic is not topic or not verifier(question):
             raise ValueError("candidate failed verification")
     except Exception:
-        attempt = int(event.get("attempt", 1))
+        attempt_state = event.get("attemptState") or {}
+        attempt = int(event.get("attempt", attempt_state.get("attempt", 1)))
         if attempt < 3:
-            return {"status": "retry", "attempt": attempt}
-        return _fallback(learner_id, topic, mastery_repository, question_repository, attempt_repository, failure_counter)
+            return {**dict(event), "status": "retry", "attempt": attempt}
+        if question_repository is None or mastery_repository is None:
+            from .dependencies import compose_dependencies
+            deps = compose_dependencies()
+            question_repository = question_repository or deps["question_repository"]
+            mastery_repository = mastery_repository or deps["mastery_repository"]
+        return _fallback(learner_id, topic, mastery_repository, question_repository)
     if prepared_repository is None:
-        raise RuntimeError("prepared_repository is required")
+        from .dependencies import compose_dependencies
+        prepared_repository = compose_dependencies()["prepared_repository"]
     expires_at = current + PREPARED_TTL
     prepared_repository.save(PreparedQuestion(learner_id, topic, question, expires_at))
     return {"status": "accepted", "questionId": question.question_id, "expiresAt": expires_at.isoformat()}

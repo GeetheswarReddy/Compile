@@ -16,7 +16,7 @@ The demo uses browser-generated anonymous identity, per-Topic Mastery, a five-Qu
 
 ```bash
 python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m pip install -r requirements-dev.txt
 npm install --prefix frontend --no-package-lock
 ```
 
