@@ -55,7 +55,10 @@ def _question_item(question: Question) -> dict[str, Any]:
 
 
 def _question_from_item(item: Mapping[str, Any]) -> Question:
-    tests = tuple(TestCase(t["input_data"], t["expected_output"]) for t in item["hiddenTests"])
+    tests = tuple(
+        TestCase(t.get("input_data", t.get("input")), t.get("expected_output", t.get("expected")))
+        for t in item["hiddenTests"]
+    )
     return Question(
         question_id=item["questionId"], topic=Topic(item["topic"]), difficulty=int(item["difficulty"]),
         prompt=item["prompt"], starter_code=item.get("starterCode", ""), hidden_tests=tests,
