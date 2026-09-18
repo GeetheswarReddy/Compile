@@ -85,7 +85,7 @@ class LearnerRepository(_Repository):
         item = self._get({"learnerId": learner_id})
         return None if item is None else LearnerState(
             learner_id=item["learnerId"], baseline_completed=item.get("baselineCompleted", False),
-            run_check_actions=item.get("runCheckActions", 0), generation_requests=item.get("generationRequests", 0),
+            run_check_actions=int(item.get("runCheckActions", 0)), generation_requests=int(item.get("generationRequests", 0)),
         )
 
     def save(self, learner: LearnerState) -> LearnerState:
