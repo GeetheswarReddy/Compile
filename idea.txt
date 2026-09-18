@@ -1,0 +1,44 @@
+## Track
+**Ship It** — deployed, live URL, using Bedrock/Lambda/DynamoDB/Step Functions/API Gateway/Amplify. Not Build It — your whole design already assumes cloud AWS services, don't pivot now.
+
+## Problem framing (lead with this in your pitch)
+You're a final-year CS student actually prepping for placements right now — this isn't hypothetical. Static question banks (LeetCode, Striver's sheet) don't calibrate to where you actually are, and generated practice questions from raw LLMs are frequently broken. You built the fix you needed.
+
+## Name
+**Compile** — a question is only ever served after it "compiles": passes verification against its own generated test cases. Literal, not a vibe name.
+
+## Core features (weekend build)
+1. **Seed question bank** — ~10 verified questions per topic, 2-3 topics (arrays, strings, +1), each with reference solution + test cases, stored in **S3**
+2. **Baseline assessment** — 5 fixed questions → initial per-topic mastery score
+3. **Difficulty-stepping loop** — correct → harder, wrong → easier (simple IRT-style stepping)
+4. **Question generation pipeline** — LLM generates question + solution + tests, grounded in seed corpus + mastery level → verified via Judge0/Piston → retry up to 3x → fallback to closest-difficulty seeded question, logged as `seeded` vs `generated`
+5. **In-browser code editor + execution** via Judge0/Piston
+6. **Tag-hiding UI** — hidden by default, explicit toggle
+7. **Generation failure logging** — per-topic counter
+8. **Hint ladder** — 4 levels (nudge → technique → pseudocode → full solution), unlocked one at a time on request, never auto-advanced; hint usage logged and should lower mastery confidence on that topic, not just count as "solved"
+
+## AWS stack (revised minimum for a weekend, Ship It track)
+- **Amplify Hosting** — deploys the frontend, gets you a URL fast
+- **API Gateway** — fronts your backend so the UI can actually call it
+- **Lambda** — generate/verify pipeline steps, short-lived by design
+- **Step Functions** — orchestrates generate → verify → retry → fallback
+- **Bedrock (Converse API)** — model calls; swap `modelId` per step without rewriting context handling
+- **DynamoDB** — mastery scores, topic metadata, hint-usage logs, generation-failure counters
+- **S3** — seed question corpus (editable without redeploying Lambda)
+- **Cut: Cognito** — skip for the demo; single demo user/anonymous session is enough, auth setup is a time sink you don't need
+- **Cut: EventBridge** — no scheduled/triggered jobs needed for this scope
+
+## Cut from original pitch entirely
+- Web scraping → manually-seeded corpus
+- Per-topic subagents with separate persistent memory → one LLM call + mastery JSON in DynamoDB
+- Full standing orchestrator/subagent framework → collapsed into Step Functions + Lambda for now
+
+## UI (3 pages)
+1. **Topic select** — flat list, mastery bar + Start per topic
+2. **Baseline assessment** — one question at a time, progress dots, no timer
+3. **Practice screen** — question (hint ladder + tag toggle) | code editor | **agent trace panel** (current step, retry log, provenance, mastery snapshot) — **dev/demo visibility only**, gate before real users see it
+
+## Differentiators (lead with these, not the architecture)
+1. **Generation, not just selection** — calibrated to your mastery, grounded in a real seed corpus, not a static bank
+2. **A verification loop most people skip** — the actual hard engineering problem; makes generation trustworthy instead of a liability
+3. **Graceful degradation** — seeded fallback + hint ladder mean it never dead-ends into "sorry" or a spoiled full answer

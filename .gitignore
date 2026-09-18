@@ -1,0 +1,33 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node / Vite
+node_modules/
+frontend/node_modules/
+frontend/dist/
+npm-debug.log*
+
+# Environment and AWS local artifacts
+.env
+.env.*
+!.env.example
+frontend/.env
+frontend/.env.local
+.aws-sam/
+samconfig.local.toml
+
+# IDE and operating-system files
+.DS_Store
+.idea/
+.vscode/
+
+# Generated orchestration output
+logs/*
+!logs/.gitkeep
+tickets/out/*
+!tickets/out/.gitkeep

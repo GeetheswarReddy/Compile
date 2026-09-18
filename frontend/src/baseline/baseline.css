@@ -1,0 +1,24 @@
+.baseline-page { min-height: 100vh; display: grid; place-items: center; padding: 2rem 1rem; background: radial-gradient(circle at top, #24365d 0, #101827 48%, #0b1220 100%); }
+.baseline-card { width: min(100%, 760px); padding: clamp(1.5rem, 5vw, 3.25rem); border: 1px solid #33476e; border-radius: 24px; background: rgba(15, 23, 42, .94); box-shadow: 0 24px 80px rgba(0, 0, 0, .3); }
+.baseline-topline { display: flex; justify-content: space-between; gap: 1rem; color: #9fb0ce; font-size: .9rem; }
+.baseline-eyebrow { margin: 0; color: #8ce2c0; font-size: .78rem; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+.baseline-progress { display: flex; gap: .5rem; margin: 1.6rem 0 2.3rem; }
+.baseline-dot { width: 2.5rem; height: .35rem; border-radius: 99px; background: #33415e; }
+.baseline-dot.is-done, .baseline-dot.is-current { background: #62d7ac; }
+.baseline-dot.is-current { box-shadow: 0 0 0 3px rgba(98, 215, 172, .16); }
+.baseline-topic { margin: 0 0 .45rem; color: #8ce2c0; font-weight: 700; }
+.baseline-meta { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem; color: #9fb0ce; font-size: .85rem; }
+.baseline-meta span { padding: .25rem .55rem; border: 1px solid #354768; border-radius: 999px; }
+.baseline-card h1 { margin: 0 0 1.5rem; color: #f8fafc; font-size: clamp(1.55rem, 4vw, 2.25rem); line-height: 1.15; }
+.baseline-signature { overflow-x: auto; margin: 0 0 1.25rem; padding: 1rem; border-radius: 12px; color: #b8f3df; background: #111d31; }
+.baseline-constraints { margin: 0 0 1.5rem; color: #b8c6da; }
+.baseline-constraints h2 { margin: 0 0 .4rem; color: #e2e8f0; font-size: .85rem; text-transform: uppercase; letter-spacing: .08em; }
+.baseline-constraints p { margin: 0; white-space: pre-wrap; line-height: 1.5; }
+.baseline-code-label { display: block; margin-bottom: .5rem; color: #dbe7fa; font-weight: 700; }
+.baseline-code { display: block; width: 100%; min-height: 220px; resize: vertical; padding: 1rem; border: 1px solid #354768; border-radius: 12px; color: #f8fafc; background: #111d31; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; line-height: 1.5; outline: none; }
+.baseline-code:focus { border-color: #62d7ac; box-shadow: 0 0 0 3px rgba(98, 215, 172, .16); }
+.baseline-button { margin-top: 1.5rem; width: 100%; padding: .9rem 1.1rem; border: 0; border-radius: 12px; color: #0b1920; background: #62d7ac; font-weight: 800; }
+.baseline-button:disabled { cursor: not-allowed; opacity: .45; }
+.baseline-state { text-align: center; }
+.baseline-state p:not(.baseline-eyebrow) { color: #aebbd0; line-height: 1.6; }
+@media (max-width: 480px) { .baseline-topline { align-items: flex-start; flex-direction: column; } .baseline-dot { flex: 1; } }
