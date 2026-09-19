@@ -1,3 +1,4 @@
+import QuestionExamples from '../practice/QuestionExamples';
 import React, { useEffect } from 'react';
 import CodeEditor from './CodeEditor';
 import { usePractice } from './usePractice';
@@ -13,7 +14,7 @@ function displayTopic(topicId, question) {
   return question?.topic || topicNames[topicId] || topicId;
 }
 
-export default function PracticeScreen({ topicId, onQuestionIdChange }) {
+export default function PracticeScreen({ topicId, onQuestionIdChange, onAttemptChange }) {
   const practice = usePractice(topicId);
   const { question, verdict, readOnly, error, loading, submitting, generating } = practice;
   const techniqueTag = question?.techniqueTag || question?.technique;
@@ -22,6 +23,8 @@ export default function PracticeScreen({ topicId, onQuestionIdChange }) {
     onQuestionIdChange?.(question?.questionId || '');
     return () => onQuestionIdChange?.('');
   }, [onQuestionIdChange, question?.questionId]);
+
+  useEffect(() => { onAttemptChange?.(Boolean(verdict)); }, [verdict, onAttemptChange]);
 
   return (
     <main className="practice-screen">
@@ -47,6 +50,7 @@ export default function PracticeScreen({ topicId, onQuestionIdChange }) {
             </div>
             <h2 id="practice-question-title">Solve this problem</h2>
             <p className="practice-prompt">{question.prompt}</p>
+            <QuestionExamples examples={question.examples} />
             {techniqueTag && !practice.tagRevealed && (
               <button className="practice-link" type="button" onClick={practice.revealTag}>Reveal technique tag</button>
             )}
@@ -56,12 +60,13 @@ export default function PracticeScreen({ topicId, onQuestionIdChange }) {
           <CodeEditor value={practice.code} onChange={practice.setCode} readOnly={readOnly} disabled={readOnly} />
 
           <div className="practice-actions">
-            <button type="button" className="practice-primary" onClick={practice.runCheck} disabled={readOnly || submitting}>
+            <button type="button" className="practice-primary" onClick={practice.runCheck} disabled={readOnly || submitting || generating}>
               {submitting ? 'Checking…' : 'Run & Check'}
             </button>
-            <button type="button" className="practice-secondary" onClick={practice.generate} disabled={readOnly || generating}>
+            <button type="button" className="practice-secondary" onClick={practice.generate} disabled={readOnly || generating || submitting}>
               {generating ? 'Generating…' : 'Generate another'}
             </button>
+            <button type="button" className="practice-secondary" onClick={practice.loadQuestion} disabled={loading || generating || submitting || !verdict}>Next question</button>
           </div>
 
           {verdict && (
@@ -85,7 +90,7 @@ export default function PracticeScreen({ topicId, onQuestionIdChange }) {
           )}
         </section>
       ) : (
-        <p className="practice-empty">No question is available for this topic yet.</p>
+        <p className="practice-empty">You’ve completed the available questions for this topic. Choose another topic to keep learning.</p>
       )}
     </main>
   );

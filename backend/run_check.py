@@ -17,12 +17,7 @@ from .execution_runner import run_submission
 from .quota import consume_execution_quota
 
 
-def _response(status_code: int, payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    return {
-        "statusCode": status_code,
-        "headers": {"Content-Type": "application/json"},
-        "body": json.dumps(dict(payload or {})),
-    }
+from .http import response as _response
 
 
 def _body(event: Mapping[str, Any]) -> dict[str, Any]:
@@ -98,7 +93,8 @@ def run_check(event: Mapping[str, Any], context: Any) -> dict[str, Any]:
         if not consume_execution_quota(learner_repo, learner_id, demo_quota):
             return _response(429, {"error": "execution quota exhausted"})
 
-        verdict = run_submission(question, code)
+        executor = context.get("executor", run_submission) if isinstance(context, Mapping) else run_submission
+        verdict = executor(question, code)
         scored = attempt_repo.put_scored_attempt(
             learner_id,
             question_id,
@@ -114,11 +110,12 @@ def run_check(event: Mapping[str, Any], context: Any) -> dict[str, Any]:
         trace_repo.append(learner_id, {
             "questionId": question_id,
             "provenance": question.provenance.value,
-            "retries": 0,
-            "retryCount": 0,
+            "retries": question.verification_retries,
+            "retryCount": question.verification_retries,
             "mastery": mastery.score if mastery is not None else None,
             "masterySnapshot": serialize_mastery_state(mastery) if mastery is not None else None,
             "scored": scored,
+            "scoredAt": datetime.now(timezone.utc).isoformat(),
         })
         return _response(200, {
             "verdict": serialize_verdict(verdict),

@@ -24,6 +24,10 @@ def compose_dependencies(*, dynamodb: Any | None = None, s3: Any | None = None, 
         s3 = s3 or boto3.client("s3")
         bedrock = bedrock or boto3.client("bedrock-runtime")
         stepfunctions = stepfunctions or boto3.client("stepfunctions")
+    from .quota import DynamoQuota
+    from .execution_client import run_submission
+    import boto3
+    quota_client = boto3.client("dynamodb")
     table = lambda name: dynamodb.Table(os.environ[name])
     return {
         "learner_repository": LearnerRepository(table("LEARNERS_TABLE")),
@@ -36,9 +40,8 @@ def compose_dependencies(*, dynamodb: Any | None = None, s3: Any | None = None, 
         "s3": s3,
         "bedrock_client": bedrock,
         "step_functions_client": stepfunctions,
-        # Run & Check's dependency resolver requires a quota object. None
-        # means only the persisted learner quota applies.
-        "demo_quota": None,
+        "demo_quota": DynamoQuota(quota_client, os.environ["QUOTAS_TABLE"], os.environ["LEARNERS_TABLE"]),
+        "executor": run_submission,
     }
 
 

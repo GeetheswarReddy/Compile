@@ -56,3 +56,21 @@ def test_network_import_is_blocked() -> None:
     verdict = run_submission(question, "def solve(items):\n    import socket\n    return 1\n")
 
     assert not verdict.passed
+
+
+def test_function_scaffold_selects_entry_point_before_helper():
+    from dataclasses import replace
+    question = replace(_question(TestCase([1], 1), TestCase([2], 2)), starter_code='def solve(items): pass')
+    code = 'def solve(items):\n    return items[0]\ndef helper():\n    return 999'
+    assert run_submission(question, code).passed
+
+
+def test_linux_kernel_restrictions_block_raw_socket_and_process_creation():
+    import sys
+    import pytest
+    if sys.platform != 'linux':
+        pytest.skip('Kernel sandbox is enforced on the deployed Linux runtime')
+    question = _question(TestCase([1], 1), TestCase([2], 2))
+    # _socket bypasses the friendly import blacklist; the kernel must deny it.
+    assert not run_submission(question, 'def solve(items):\n    import _socket\n    _socket.socket()\n    return items[0]').passed
+    assert not run_submission(question, 'def solve(items):\n    import os\n    os.fork()\n    return items[0]').passed

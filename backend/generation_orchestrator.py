@@ -15,77 +15,14 @@ from .contracts import Topic
 from .quota import consume_generation_quota
 
 MAX_CANDIDATES = 3
-CANDIDATE_TIMEOUT_SECONDS = 2
+CANDIDATE_TIMEOUT_SECONDS = 35
 GENERATION_TIMEOUT_SECONDS = 8
 
 
-def generation_state_machine_definition(
-    candidate_generator_arn: str = "${GenerateCandidateArn}",
-    candidate_handler_arn: str = "${HandleGeneratedCandidateArn}",
-) -> dict[str, Any]:
-    """Return the ASL definition owned by this ticket.
-
-    A task timeout is the per-candidate budget.  Step Functions' ``MaxAttempts``
-    counts retries after the initial task, so it is two for three total
-    candidates.
-    """
-    return {
-        "Comment": "Compile verified question generation",
-        "StartAt": "GenerateCandidate",
-        "TimeoutSeconds": GENERATION_TIMEOUT_SECONDS,
-        "States": {
-            "GenerateCandidate": {
-                "Type": "Task",
-                "Resource": candidate_generator_arn,
-                "TimeoutSeconds": CANDIDATE_TIMEOUT_SECONDS,
-                "Retry": [{
-                    "ErrorEquals": ["States.ALL"],
-                    "MaxAttempts": MAX_CANDIDATES - 1,
-                    "BackoffRate": 1.0,
-                    "IntervalSeconds": 0,
-                }],
-                "Catch": [{"ErrorEquals": ["States.ALL"], "Next": "Fallback"}],
-                "Next": "HandleGeneratedCandidate",
-            },
-            "HandleGeneratedCandidate": {
-                "Type": "Task",
-                "Resource": candidate_handler_arn,
-                "TimeoutSeconds": CANDIDATE_TIMEOUT_SECONDS,
-                "Retry": [{
-                    "ErrorEquals": ["States.ALL"],
-                    "MaxAttempts": MAX_CANDIDATES - 1,
-                    "BackoffRate": 1.0,
-                    "IntervalSeconds": 0,
-                }],
-                "Catch": [{"ErrorEquals": ["States.ALL"], "Next": "Fallback"}],
-                "Next": "CandidateResult",
-            },
-            "CandidateResult": {
-                "Type": "Choice",
-                "Choices": [
-                    {"Variable": "$.status", "StringEquals": "accepted", "Next": "Succeed"},
-                    {"Variable": "$.status", "StringEquals": "stale", "Next": "Stale"},
-                    {
-                        "And": [
-                            {"Variable": "$.status", "StringEquals": "retry"},
-                            {"Variable": "$.attemptState.attempt", "NumericLessThan": MAX_CANDIDATES},
-                        ],
-                        "Next": "NextAttempt",
-                    },
-                ],
-                "Default": "Fallback",
-            },
-            "NextAttempt": {
-                "Type": "Pass",
-                "Parameters": {"attempt.$": "States.MathAdd($.attempt, 1)"},
-                "ResultPath": "$.attemptState",
-                "Next": "GenerateCandidate",
-            },
-            "Fallback": {"Type": "Task", "Resource": candidate_handler_arn, "Parameters": {"fallback": True, "learnerId.$": "$.learnerId", "topic.$": "$.topic"}, "End": True},
-            "Stale": {"Type": "Succeed"},
-            "Succeed": {"Type": "Succeed"},
-        },
-    }
+def generation_state_machine_definition(candidate_generator_arn="${GenerateCandidateArn}", candidate_handler_arn="${HandleGeneratedCandidateArn}"):
+    from pathlib import Path
+    text = (Path(__file__).resolve().parents[1] / "infra/statemachines/generation.asl.json").read_text()
+    return json.loads(text.replace("${GenerateCandidateArn}", candidate_generator_arn).replace("${HandleGeneratedCandidateArn}", candidate_handler_arn))
 
 
 # Short aliases are useful to IaC adapters and preserve a discoverable public
@@ -147,7 +84,7 @@ def start_generation(
     arn = state_machine_arn or os.environ.get("GENERATION_STATE_MACHINE_ARN")
     if not arn:
         raise RuntimeError("GENERATION_STATE_MACHINE_ARN is not configured")
-    payload = {"learnerId": learner_id, "topic": topic.value, "mastery": body.get("mastery"), "requestId": event.get("requestId")}
+    payload = {"learnerId": learner_id, "topic": topic.value, "mastery": body.get("mastery"), "requestId": event.get("requestId"), "attempt": 1}
     result = step_functions_client.start_execution(stateMachineArn=arn, input=json.dumps(payload))
     return {"statusCode": 202, "body": json.dumps({"executionArn": result.get("executionArn"), "topic": topic.value})}
 

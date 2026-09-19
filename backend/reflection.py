@@ -22,12 +22,7 @@ PRESIGNED_URL_EXPIRY_SECONDS = 900
 _SAFE_PART = re.compile(r"^[A-Za-z0-9._~-]+$")
 
 
-def _response(status_code: int, payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    return {
-        "statusCode": status_code,
-        "headers": {"Content-Type": "application/json"},
-        "body": json.dumps(dict(payload or {})),
-    }
+from .http import response as _response
 
 
 def _body(event: Mapping[str, Any]) -> dict[str, Any]:
@@ -112,6 +107,8 @@ def create_reflection(
         content_type = body.get("contentType", "audio/webm")
         if not isinstance(content_type, str) or not content_type.strip():
             raise ValueError("contentType must be a non-empty string")
+        if not content_type.startswith("audio/"):
+            raise ValueError("contentType must be audio")
         repository, s3 = _dependencies(repository, s3)
         existing = repository.get(learner_id, question_id)
         if existing is not None and body.get("confirmReplacement") is not True:
@@ -140,6 +137,7 @@ def create_reflection(
             "contentType": content_type,
             "createdAt": current.isoformat(),
             "expiresAt": expires_at.isoformat(),
+            "ttl": int(expires_at.timestamp()),
         }
         repository.save(learner_id, question_id, metadata)
         return _response(201, {"uploadUrl": upload_url, **metadata})
@@ -168,4 +166,17 @@ def delete_reflection(
             repository.delete(learner_id, question_id)
         return _response(204)
     except (ValueError, json.JSONDecodeError) as exc:
+        return _response(400, {"error": str(exc)})
+
+
+def get_reflection(event, context, repository=None, s3=None, now=None):
+    try:
+        learner_id, question_id, _ = _request_values(event)
+        repository, s3 = _dependencies(repository, s3)
+        record = repository.get(learner_id, question_id)
+        if not record or datetime.fromisoformat(record["expiresAt"]) <= _now(now):
+            return _response(200, {"reflection": None})
+        url = s3.generate_presigned_url("get_object", Params={"Bucket": os.environ["REFLECTION_BUCKET"], "Key": record["s3Key"]}, ExpiresIn=PRESIGNED_URL_EXPIRY_SECONDS)
+        return _response(200, {"reflection": {"playbackUrl": url, "expiresAt": record["expiresAt"], "contentType": record["contentType"]}})
+    except ValueError as exc:
         return _response(400, {"error": str(exc)})

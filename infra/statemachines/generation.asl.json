@@ -1,0 +1,92 @@
+{
+  "Comment": "Browser falls back after eight seconds; verification continues asynchronously.",
+  "StartAt": "GenerateCandidate",
+  "TimeoutSeconds": 180,
+  "States": {
+    "GenerateCandidate": {
+      "Type": "Task",
+      "Resource": "${GenerateCandidateArn}",
+      "TimeoutSeconds": 35,
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.generationError",
+          "Next": "CandidateFailed"
+        }
+      ],
+      "Next": "HandleGeneratedCandidate"
+    },
+    "HandleGeneratedCandidate": {
+      "Type": "Task",
+      "Resource": "${HandleGeneratedCandidateArn}",
+      "TimeoutSeconds": 20,
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.verificationError",
+          "Next": "CandidateFailed"
+        }
+      ],
+      "Next": "CandidateResult"
+    },
+    "CandidateResult": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.status",
+          "StringEquals": "accepted",
+          "Next": "Done"
+        },
+        {
+          "Variable": "$.status",
+          "StringEquals": "stale",
+          "Next": "Done"
+        },
+        {
+          "Variable": "$.status",
+          "StringEquals": "fallback",
+          "Next": "Done"
+        }
+      ],
+      "Default": "CandidateFailed"
+    },
+    "CandidateFailed": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.attempt",
+          "NumericLessThan": 3,
+          "Next": "NextAttempt"
+        }
+      ],
+      "Default": "Fallback"
+    },
+    "NextAttempt": {
+      "Type": "Pass",
+      "Parameters": {
+        "learnerId.$": "$.learnerId",
+        "topic.$": "$.topic",
+        "mastery.$": "$.mastery",
+        "attempt.$": "States.MathAdd($.attempt, 1)"
+      },
+      "Next": "GenerateCandidate"
+    },
+    "Fallback": {
+      "Type": "Task",
+      "Resource": "${HandleGeneratedCandidateArn}",
+      "Parameters": {
+        "fallback": true,
+        "learnerId.$": "$.learnerId",
+        "topic.$": "$.topic"
+      },
+      "End": true
+    },
+    "Done": {
+      "Type": "Succeed"
+    }
+  }
+}

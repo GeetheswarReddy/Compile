@@ -25,6 +25,7 @@ _RESULT_FD = 198
 
 
 _CHILD_PROGRAM = r'''
+import ast
 import builtins
 import base64
 import contextlib
@@ -65,7 +66,11 @@ def safe_value(value):
     return rendered[:4000]
 
 def emit(payload):
-    os.write(198, json.dumps(payload, separators=(",", ":")).encode())
+    data = json.dumps(payload, separators=(",", ":")).encode()
+    os.write(198, data if len(data) < 4000 else b'{"passed":false,"failed":[]}')
+
+__SANDBOX__
+restrict_child()
 
 namespace = {"__name__": "__submission__"}
 try:
@@ -81,12 +86,13 @@ try:
     ]
     if not candidates:
         raise RuntimeError("submission did not define a callable")
-    function = candidates[-1]
+    definitions = [node.name for node in ast.parse(starter or submission).body if isinstance(node, ast.FunctionDef)]
+    function = namespace[definitions[0]] if definitions else candidates[-1]
     failures = []
-    for input_data, expected in tests:
+    for input_data, expected, positional in tests:
         try:
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
-                actual = function(*input_data) if isinstance(input_data, tuple) else function(input_data)
+                actual = function(*input_data) if positional or isinstance(input_data, tuple) else function(input_data)
             if actual != expected:
                 failures.append({
                     "input": safe_value(input_data),
@@ -116,6 +122,10 @@ def _limit_address_space() -> None:
         import resource
 
         resource.setrlimit(resource.RLIMIT_AS, (ADDRESS_SPACE_BYTES, ADDRESS_SPACE_BYTES))
+        resource.setrlimit(resource.RLIMIT_CPU, (5, 5))
+        resource.setrlimit(resource.RLIMIT_FSIZE, (0, 0))
+        if sys.platform == "linux":
+            resource.setrlimit(resource.RLIMIT_NPROC, (0, 0))
     except (ImportError, OSError, ValueError):
         # Windows has no resource module.  The subprocess boundary and timeout
         # still apply there; Lambda and the deployment target are Linux.
@@ -123,9 +133,11 @@ def _limit_address_space() -> None:
 
 
 def _child_script(question: Question, code: str) -> str:
+    from pathlib import Path
     replacements = {
+        "__SANDBOX__": Path(__file__).with_name("sandbox_limits.py").read_text(),
         "__TESTS__": repr(base64.b64encode(pickle.dumps(
-            [(test.input_data, test.expected_output) for test in question.hidden_tests]
+            [(test.input_data, test.expected_output, test.positional) for test in question.hidden_tests]
         )).decode()),
         "__CODE__": repr(base64.b64encode(pickle.dumps(code)).decode()),
         "__STARTER__": repr(base64.b64encode(pickle.dumps(question.starter_code)).decode()),
@@ -151,6 +163,8 @@ def run_submission(question: Question, code: str) -> SubmissionVerdict:
         raise TypeError("question must be a Question")
     if not isinstance(code, str):
         raise TypeError("code must be a string")
+    if len(code.encode()) > 65536:
+        raise ValueError("code must be at most 64 KiB")
 
     read_fd, write_fd = os.pipe()
     process: subprocess.Popen[bytes] | None = None
@@ -209,3 +223,10 @@ def verify_question(question: Question) -> bool:
     if not isinstance(question, Question):
         raise TypeError("question must be a Question")
     return run_submission(question, question.reference_solution).passed
+
+
+def handler(event, context):
+    """Private Lambda boundary. This function has no database or S3 permissions."""
+    from .repositories import _question_from_item
+    from .contracts import serialize_verdict
+    return serialize_verdict(run_submission(_question_from_item(event["question"]), event["code"]))

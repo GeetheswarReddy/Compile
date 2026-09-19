@@ -10,6 +10,7 @@ Globals:
     CodeUri: ..
     Environment:
       Variables:
+        QUOTAS_TABLE: !Ref QuotasTable
         LEARNERS_TABLE: !Ref LearnersTable
         MASTERY_TABLE: !Ref MasteryTable
         QUESTIONS_TABLE: !Ref QuestionsTable
@@ -26,7 +27,7 @@ Globals:
 Parameters:
   BedrockModelId:
     Type: String
-    Default: anthropic.claude-3-haiku-20240307-v1:0
+    Default: amazon.nova-lite-v1:0
     Description: Bedrock model identifier enabled in the deployment Region.
 
 Resources:
@@ -35,10 +36,26 @@ Resources:
     Properties:
       StageName: v1
       EndpointConfiguration: REGIONAL
+      GatewayResponses:
+        DEFAULT_4XX:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin: "'*'"
+        DEFAULT_5XX:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin: "'*'"
       Cors:
         AllowMethods: "'GET,POST,DELETE,OPTIONS'"
         AllowHeaders: "'Content-Type,X-Learner-Id'"
         AllowOrigin: "'*'"
+
+  QuotasTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: quotaId, AttributeType: S}]
+      KeySchema: [{AttributeName: quotaId, KeyType: HASH}]
 
   LearnersTable:
     Type: AWS::DynamoDB::Table
@@ -90,6 +107,7 @@ Resources:
   ReflectionsTable:
     Type: AWS::DynamoDB::Table
     Properties:
+      TimeToLiveSpecification: {AttributeName: ttl, Enabled: true}
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - {AttributeName: learnerId, AttributeType: S}
@@ -122,6 +140,13 @@ Resources:
         BlockPublicPolicy: true
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins: ['*']
+            AllowedMethods: [GET, PUT, HEAD]
+            AllowedHeaders: [Content-Type]
+            ExposedHeaders: [ETag]
+            MaxAge: 300
       LifecycleConfiguration:
         Rules:
           - Id: ExpireReflectionAudioAfter30Days
@@ -141,29 +166,65 @@ Resources:
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
 
-  ExecutionRunnerPolicy:
-    Type: AWS::IAM::ManagedPolicy
+  ExecutionVpc:
+    Type: AWS::EC2::VPC
     Properties:
-      Description: Least-privilege data access for execution; no network actions.
-      PolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Sid: ReadQuestions
-            Effect: Allow
-            Action: [dynamodb:GetItem, dynamodb:Query]
-            Resource: !GetAtt QuestionsTable.Arn
-          - Sid: ReadAndWriteExecutionState
-            Effect: Allow
-            Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem]
-            Resource:
-              - !GetAtt LearnersTable.Arn
-              - !GetAtt MasteryTable.Arn
-              - !GetAtt AttemptsTable.Arn
-              - !GetAtt TraceTable.Arn
-          - Sid: WriteLogs
-            Effect: Allow
-            Action: [logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents]
-            Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*
+      CidrBlock: 10.80.0.0/24
+      EnableDnsSupport: false
+      EnableDnsHostnames: false
+
+  ExecutionSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref ExecutionVpc
+      CidrBlock: 10.80.0.0/28
+      MapPublicIpOnLaunch: false
+
+  ExecutionNetworkAcl:
+    Type: AWS::EC2::NetworkAcl
+    Properties:
+      VpcId: !Ref ExecutionVpc
+
+  ExecutionNetworkAclAssociation:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    Properties:
+      SubnetId: !Ref ExecutionSubnet
+      NetworkAclId: !Ref ExecutionNetworkAcl
+
+  ExecutionSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: No usable ingress or egress for untrusted Python
+      VpcId: !Ref ExecutionVpc
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 1
+          ToPort: 1
+          CidrIp: 127.0.0.1/32
+
+  SandboxFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    DependsOn: ExecutionNetworkAclAssociation
+    Properties:
+      Handler: backend.execution_runner.handler
+      Timeout: 8
+      MemorySize: 256
+      VpcConfig:
+        SecurityGroupIds: [!Ref ExecutionSecurityGroup]
+        SubnetIds: [!Ref ExecutionSubnet]
+      Policies:
+        - AWSLambdaVPCAccessExecutionRole
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Deny
+              Action: ec2:*
+              Resource: '*'
+              Condition:
+                ArnEquals:
+                  lambda:SourceFunctionArn: !Sub arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${AWS::StackName}-sandbox
+      FunctionName: !Sub ${AWS::StackName}-sandbox
 
   ApiAdapterPolicy:
     Type: AWS::IAM::ManagedPolicy
@@ -175,6 +236,7 @@ Resources:
           - Effect: Allow
             Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:DeleteItem, dynamodb:Query, dynamodb:Scan]
             Resource:
+              - !GetAtt QuotasTable.Arn
               - !GetAtt LearnersTable.Arn
               - !GetAtt MasteryTable.Arn
               - !GetAtt QuestionsTable.Arn
@@ -185,15 +247,25 @@ Resources:
 
   ExecutionRunnerFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
     Properties:
       Handler: backend.api_adapters.run_and_check
+      Timeout: 25
       FunctionName: !Sub ${AWS::StackName}-execution-runner
-      Policies: [!Ref ExecutionRunnerPolicy]
+      Environment:
+        Variables:
+          EXECUTION_FUNCTION_NAME: !Ref SandboxFunction
+      Policies:
+        - !Ref ApiAdapterPolicy
+        - LambdaInvokePolicy: {FunctionName: !Ref SandboxFunction}
       Events:
         RunCheck: {Type: Api, Properties: {RestApiId: !Ref Api, Path: /run-check, Method: post}}
 
   InitLearnerFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
     Properties:
       Handler: backend.api_adapters.init_learner
       Policies: [!Ref ApiAdapterPolicy]
@@ -202,6 +274,8 @@ Resources:
 
   BaselineNextFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
     Properties:
       Handler: backend.api_adapters.baseline_next
       Policies: [!Ref ApiAdapterPolicy]
@@ -210,22 +284,44 @@ Resources:
 
   BaselineSubmitFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
     Properties:
       Handler: backend.api_adapters.baseline_submit
-      Policies: [!Ref ApiAdapterPolicy]
+      Timeout: 25
+      Environment:
+        Variables:
+          EXECUTION_FUNCTION_NAME: !Ref SandboxFunction
+      Policies:
+        - !Ref ApiAdapterPolicy
+        - LambdaInvokePolicy: {FunctionName: !Ref SandboxFunction}
       Events:
         Submit: {Type: Api, Properties: {RestApiId: !Ref Api, Path: /baseline/submit, Method: post}}
 
   NextQuestionFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
     Properties:
       Handler: backend.api_adapters.next_question
       Policies: [!Ref ApiAdapterPolicy]
       Events:
         Next: {Type: Api, Properties: {RestApiId: !Ref Api, Path: '/topic/{topicId}/next-question', Method: get}}
 
+  PracticeHistoryFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      Handler: backend.api_adapters.practice_history
+      Policies: [!Ref ApiAdapterPolicy]
+      Events:
+        History: {Type: Api, Properties: {RestApiId: !Ref Api, Path: '/topic/{topicId}/history', Method: get}}
+
   GenerateFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
     Properties:
       Handler: backend.api_adapters.generate
       Environment:
@@ -246,6 +342,8 @@ Resources:
 
   HintFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
     Properties:
       Handler: backend.api_adapters.next_hint
       Policies: [!Ref ApiAdapterPolicy]
@@ -254,6 +352,8 @@ Resources:
 
   ReflectionCreateFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
     Properties:
       Handler: backend.api_adapters.create_reflection
       Policies:
@@ -263,8 +363,22 @@ Resources:
       Events:
         Create: {Type: Api, Properties: {RestApiId: !Ref Api, Path: /reflection, Method: post}}
 
+  ReflectionGetFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      Handler: backend.api_adapters.get_reflection
+      Policies:
+        - !Ref ApiAdapterPolicy
+        - S3ReadPolicy: {BucketName: !Ref ReflectionBucket}
+      Events:
+        Get: {Type: Api, Properties: {RestApiId: !Ref Api, Path: '/reflection/{questionId}', Method: get}}
+
   ReflectionDeleteFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
     Properties:
       Handler: backend.api_adapters.delete_reflection
       Policies:
@@ -276,6 +390,8 @@ Resources:
 
   DemoTraceFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
     Properties:
       Handler: backend.api_adapters.demo_trace
       Policies: [!Ref ApiAdapterPolicy]
@@ -284,22 +400,32 @@ Resources:
 
   GenerateCandidateFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
     Properties:
       Handler: backend.generation_handlers.generate_candidate
-      Timeout: 3
+      Timeout: 30
       Policies:
+        - DynamoDBReadPolicy: {TableName: !Ref QuestionsTable}
         - Version: '2012-10-17'
           Statement:
             - Effect: Allow
-              Action: bedrock:Converse
+              Action: bedrock:InvokeModel
               Resource: !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}
 
   HandleGeneratedCandidateFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
     Properties:
       Handler: backend.generation_handlers.handle_generated_candidate
-      Timeout: 3
+      Timeout: 18
+      Environment:
+        Variables:
+          EXECUTION_FUNCTION_NAME: !Ref SandboxFunction
       Policies:
+        - !Ref ApiAdapterPolicy
+        - LambdaInvokePolicy: {FunctionName: !Ref SandboxFunction}
         - DynamoDBCrudPolicy: {TableName: !Ref PreparedQuestionsTable}
         - DynamoDBReadPolicy: {TableName: !Ref QuestionsTable}
         - DynamoDBCrudPolicy: {TableName: !Ref MasteryTable}
@@ -319,6 +445,8 @@ Resources:
 
   SeedDeployFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
     Properties:
       Handler: backend.seed_deploy.seed
       Timeout: 60
@@ -327,7 +455,6 @@ Resources:
 
   SeededQuestions:
     Type: Custom::SeededQuestions
-    DependsOn: SeedDeployFunction
     Properties:
       ServiceToken: !GetAtt SeedDeployFunction.Arn
 

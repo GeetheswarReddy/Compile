@@ -8,8 +8,7 @@ from typing import Any, Mapping
 from .contracts import HintLevel, MasteryState
 
 
-def _response(status_code: int, payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    return {"statusCode": status_code, "headers": {"Content-Type": "application/json"}, "body": json.dumps(dict(payload or {}))}
+from .http import response as _response
 
 
 def _body(event: Mapping[str, Any]) -> dict[str, Any]:

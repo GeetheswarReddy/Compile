@@ -99,3 +99,16 @@ def test_delete_removes_audio_and_metadata(monkeypatch):
     assert result["statusCode"] == 204
     assert s3.deleted == [{"Bucket": "private-reflections", "Key": "recording-key"}]
     assert repository.get("learner-1", "q1") is None
+
+
+def test_playback_url_is_private_and_expired_recording_is_unavailable(monkeypatch):
+    from backend.reflection import get_reflection
+    monkeypatch.setenv('REFLECTION_BUCKET', 'private-reflections')
+    repo, s3 = FakeRepository(), FakeS3()
+    create_reflection(event(), None, repo, s3, datetime(2026, 9, 18, tzinfo=timezone.utc))
+    live = get_reflection(event(), None, repo, s3, datetime(2026, 9, 19, tzinfo=timezone.utc))
+    assert json.loads(live['body'])['reflection']['playbackUrl']
+    assert s3.presigns[-1][0] == 'get_object'
+    assert s3.presigns[-1][2] == 900
+    expired = get_reflection(event(), None, repo, s3, datetime(2026, 10, 19, tzinfo=timezone.utc))
+    assert json.loads(expired['body']) == {'reflection': None}

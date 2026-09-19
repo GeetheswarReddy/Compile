@@ -9,7 +9,10 @@ from typing import Any, Callable, Mapping
 from . import baseline, generation_orchestrator, hints, learner_state, question_select, reflection, run_check
 from .contracts import Question, Topic, serialize_learner_state, serialize_question
 from .dependencies import compose_dependencies
-from .execution_runner import run_submission
+from .execution_client import run_submission
+import logging
+
+logger = logging.getLogger(__name__)
 
 TOPIC_IDS = {
     "arrays": Topic.ARRAYS,
@@ -19,8 +22,7 @@ TOPIC_IDS = {
 TOTAL_BASELINE_QUESTIONS = 5
 
 
-def _response(status: int, payload: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    return {"statusCode": status, "headers": {"Content-Type": "application/json"}, "body": json.dumps(dict(payload or {}))}
+from .http import response as _response
 
 
 def _body(event: Mapping[str, Any]) -> dict[str, Any]:
@@ -54,19 +56,24 @@ def _public_question(question: Question | None) -> dict[str, Any] | None:
     return serialize_question(question) if question is not None else None
 
 
-def _answered(deps: Mapping[str, Any], learner_id: str) -> int:
-    table = getattr(deps["attempt_repository"], "table", None)
-    if table is None or not hasattr(table, "query"):
-        return 0
-    attempts = table.query(KeyConditionExpression="learnerId = :learnerId", ExpressionAttributeValues={":learnerId": learner_id}).get("Items", [])
-    questions = _questions(deps["question_repository"])
-    baseline_ids = {
-        question.question_id
-        for topic, difficulty in baseline.BASELINE_TARGETS
-        for question in questions
-        if question.topic is topic and question.difficulty == difficulty
-    }
-    return sum(1 for attempt in attempts if attempt.get("questionId") in baseline_ids)
+def _answered(deps, learner_id):
+    return sum(deps["attempt_repository"].get(learner_id, q.question_id) is not None
+        for q in baseline.baseline_questions(deps["question_repository"]))
+
+
+def _gate(deps, learner_id):
+    learner = deps["learner_repository"].get(learner_id)
+    if learner is None or not learner.baseline_completed:
+        return _response(403, {"error": "Complete the baseline assessment first.", "baselineRequired": True})
+    return None
+
+
+def _state(deps, learner_id):
+    learner = deps["learner_repository"].get(learner_id)
+    quota = deps["demo_quota"]
+    exhausted = quota.exhausted() if hasattr(quota, "exhausted") else False
+    return {"learner": serialize_learner_state(learner) if learner else None,
+            "readOnly": exhausted or bool(learner and (learner.run_check_actions >= 5 or learner.generation_requests >= 2))}
 
 
 def _questions(repository: Any) -> list[Question]:
@@ -83,8 +90,9 @@ def _adapt(action: Callable[[], dict[str, Any]]) -> dict[str, Any]:
         return action()
     except (ValueError, json.JSONDecodeError) as exc:
         return _response(400, {"error": str(exc)})
-    except LookupError as exc:
-        return _response(404, {"error": str(exc)})
+    except Exception:
+        logger.exception("API request failed")
+        return _response(500, {"error": "The service could not complete this request. Please retry."})
 
 
 def init_learner(event: Mapping[str, Any], context: Any) -> dict[str, Any]:
@@ -116,7 +124,15 @@ def baseline_submit(event: Mapping[str, Any], context: Any) -> dict[str, Any]:
         question = deps["question_repository"].get(question_id)
         if question is None:
             return _response(404, {"error": "question not found"})
-        learner = baseline.submit_baseline(learner_id, question_id, run_submission(question, code), deps["learner_repository"], deps["question_repository"], deps["attempt_repository"], deps["mastery_repository"])
+        current = baseline.get_baseline_next(learner_id, deps["learner_repository"], deps["question_repository"], deps["attempt_repository"])
+        if deps["attempt_repository"].get(learner_id, question_id):
+            learner = deps["learner_repository"].get(learner_id)
+            return _response(200, {"completed": learner.baseline_completed, "question": _public_question(current), "progress": {"answered": _answered(deps, learner_id), "total": 5}})
+        if current is None or current.question_id != question_id:
+            return _response(400, {"error": "Submit the current baseline question."})
+        if not deps["demo_quota"].consume():
+            return _response(429, {"error": "Demo execution quota exhausted.", "readOnly": True})
+        learner = baseline.submit_baseline(learner_id, question_id, deps.get("executor", run_submission)(question, code), deps["learner_repository"], deps["question_repository"], deps["attempt_repository"], deps["mastery_repository"])
         next_question = baseline.get_baseline_next(learner_id, deps["learner_repository"], deps["question_repository"], deps["attempt_repository"])
         return _response(200, {"completed": learner.baseline_completed, "question": _public_question(next_question), "progress": {"answered": _answered(deps, learner_id), "total": TOTAL_BASELINE_QUESTIONS}})
     return _adapt(action)
@@ -126,25 +142,44 @@ def next_question(event: Mapping[str, Any], context: Any) -> dict[str, Any]:
     del context
     def action() -> dict[str, Any]:
         deps, learner_id, topic = compose_dependencies(), _learner_id(event), _topic(event)
+        denied = _gate(deps, learner_id)
+        if denied:
+            return denied
         question = question_select.get_next_question(learner_id, topic, deps["mastery_repository"], deps["question_repository"], deps["attempt_repository"], deps["prepared_repository"])
-        return _response(200, {"question": _public_question(question)})
+        return _response(200, {"question": _public_question(question), "completed": question is None, **_state(deps, learner_id)})
     return _adapt(action)
 
 
-def run_and_check(event: Mapping[str, Any], context: Any) -> dict[str, Any]:
-    del context
-    response = run_check.run_check(event, compose_dependencies())
-    if response.get("statusCode") != 200:
-        return response
-    payload = json.loads(response["body"])
-    # The browser contract places the bounded verdict fields at top level.
-    return _response(200, {**payload.get("verdict", {}), "scored": payload.get("scored", False), "mastery": payload.get("mastery")})
+def run_and_check(event, context):
+    def action():
+        deps, learner_id = compose_dependencies(), _learner_id(event)
+        denied = _gate(deps, learner_id)
+        if denied:
+            return denied
+        response = run_check.run_check(event, deps)
+        payload = json.loads(response["body"])
+        if response["statusCode"] != 200:
+            return _response(response["statusCode"], {**payload, **_state(deps, learner_id)})
+        return _response(200, {**payload["verdict"], "scored": payload["scored"], "mastery": payload["mastery"], **_state(deps, learner_id)})
+    return _adapt(action)
 
 
-def generate(event: Mapping[str, Any], context: Any) -> dict[str, Any]:
-    del context
-    deps = compose_dependencies()
-    return generation_orchestrator.start_generation(event, None, learner_repository=deps["learner_repository"], demo_quota=deps["demo_quota"], step_functions_client=deps["step_functions_client"], state_machine_arn=os.environ.get("GENERATION_STATE_MACHINE_ARN"))
+def generate(event, context):
+    def action():
+        deps, body = compose_dependencies(), _body(event)
+        learner_id, topic = _learner_id(event, body), _topic(event, body)
+        denied = _gate(deps, learner_id)
+        if denied:
+            return denied
+        available = [q for q in deps["question_repository"].for_learner(learner_id)
+                     if q.topic is topic and not deps["attempt_repository"].get(learner_id, q.question_id)]
+        if not available and not deps["prepared_repository"].get(learner_id, topic):
+            return _response(200, {"question": None, "completed": True, **_state(deps, learner_id)})
+        mastery = deps["mastery_repository"].get(learner_id, topic)
+        normalized = {**event, "body": {"topic": topic.value, "mastery": mastery.score if mastery else 1}}
+        result = generation_orchestrator.start_generation(normalized, None, learner_repository=deps["learner_repository"], demo_quota=deps["demo_quota"], step_functions_client=deps["step_functions_client"], state_machine_arn=os.environ.get("GENERATION_STATE_MACHINE_ARN"))
+        return _response(result["statusCode"], {**json.loads(result["body"]), **_state(deps, learner_id)})
+    return _adapt(action)
 
 
 def next_hint(event: Mapping[str, Any], context: Any) -> dict[str, Any]:
@@ -155,6 +190,9 @@ def next_hint(event: Mapping[str, Any], context: Any) -> dict[str, Any]:
 def create_reflection(event: Mapping[str, Any], context: Any) -> dict[str, Any]:
     del context
     deps = compose_dependencies()
+    body = _body(event)
+    if not deps["attempt_repository"].get(_learner_id(event), body.get("questionId", "")):
+        return _response(403, {"error": "Check a solution before recording a reflection."})
     return reflection.create_reflection(event, None, repository=deps["reflection_repository"], s3=deps["s3"])
 
 
@@ -176,3 +214,33 @@ def demo_trace(event: Mapping[str, Any], context: Any) -> dict[str, Any]:
 
 
 __all__ = ["init_learner", "baseline_next", "baseline_submit", "next_question", "run_and_check", "generate", "next_hint", "create_reflection", "delete_reflection", "demo_trace"]
+
+
+def get_reflection(event, context):
+    deps = compose_dependencies()
+    return _adapt(lambda: reflection.get_reflection(event, context, repository=deps["reflection_repository"], s3=deps["s3"]))
+
+
+def practice_history(event, context):
+    deps, learner_id, topic = compose_dependencies(), _learner_id(event), _topic(event)
+    table = deps["attempt_repository"].table
+    attempts = table.query(KeyConditionExpression="learnerId = :learnerId", ExpressionAttributeValues={":learnerId": learner_id}).get("Items", [])
+    entries = []
+    for attempt in attempts:
+        question = deps["question_repository"].get(attempt["questionId"])
+        if question is not None and question.topic is topic:
+            entries.append({"question": _public_question(question), "passed": attempt["passed"]})
+    return _response(200, {"entries": entries})
+
+
+def _guard(handler):
+    from functools import wraps
+    @wraps(handler)
+    def guarded(event, context):
+        return _adapt(lambda: handler(event, context))
+    return guarded
+
+
+__all__.extend(["get_reflection", "practice_history"])
+for _handler_name in __all__:
+    globals()[_handler_name] = _guard(globals()[_handler_name])

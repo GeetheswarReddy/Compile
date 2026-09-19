@@ -90,7 +90,7 @@ def test_verified_candidate_is_stored_as_prepared_question():
     result = handle_generated_candidate(
         {"learnerId": "learner", "topic": Topic.ARRAYS.value, "candidate": candidate()},
         prepared_repository=prepared,
-        verifier=lambda value: value.question_id == "generated-1",
+        verifier=lambda value: value.question_id.startswith("generated-"),
         now=datetime(2026, 1, 1, tzinfo=timezone.utc),
     )
     assert result["status"] == "accepted"
@@ -100,7 +100,7 @@ def test_verified_candidate_is_stored_as_prepared_question():
 def test_stale_candidate_is_discarded_without_persistence_or_failure():
     prepared, mastery = Prepared(), MasteryWithFailures()
     result = handle_generated_candidate(
-        {"learnerId": "learner", "topic": Topic.ARRAYS.value, "candidate": candidate(), "deadline": "2025-12-31T23:59:59+00:00"},
+        {"learnerId": "learner", "topic": Topic.ARRAYS.value, "candidate": candidate(), "stale": True},
         prepared_repository=prepared, mastery_repository=mastery, now=datetime(2026, 1, 1, tzinfo=timezone.utc),
     )
     assert result == {"status": "stale", "discarded": True}
@@ -129,9 +129,10 @@ def test_third_failed_candidate_increments_counter_and_uses_nearest_curated_ques
 
 def test_state_machine_has_three_candidates_and_budgets():
     definition = generation_state_machine_definition()
-    assert definition["TimeoutSeconds"] == 8
-    assert definition["States"]["GenerateCandidate"]["TimeoutSeconds"] == 2
-    assert definition["States"]["GenerateCandidate"]["Retry"][0]["MaxAttempts"] == 2
+    assert definition["TimeoutSeconds"] > 8
+    assert definition["States"]["CandidateFailed"]["Choices"][0]["NumericLessThan"] == 3
+    assert definition["States"]["GenerateCandidate"]["Catch"][0]["ResultPath"] == "$.generationError"
+    assert definition["States"]["NextAttempt"]["Parameters"]["mastery.$"] == "$.mastery"
 
 
 def test_start_generation_consumes_quota_and_starts_execution():

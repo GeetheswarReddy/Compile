@@ -1,4 +1,9 @@
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+import json
+from pathlib import Path
+
+from boto3.dynamodb.types import TypeSerializer, TypeDeserializer
 
 from backend.contracts import (
     FailedCase,
@@ -23,6 +28,54 @@ from backend.repositories import (
 from backend.table_names import KEY_SCHEMAS
 
 
+class DynamoNumberTable:
+    """Exercise boto3's actual storage conversion without making AWS calls."""
+
+    def __init__(self):
+        self.item = None
+
+    def put_item(self, *, Item, **kwargs):
+        self.item = TypeSerializer().serialize(Item)
+        return {}
+
+    def get_item(self, *, Key, **kwargs):
+        return {} if self.item is None else {"Item": TypeDeserializer().deserialize(self.item)}
+
+
+def test_mastery_uses_real_dynamo_number_round_trip():
+    table = DynamoNumberTable()
+    repo = MasteryRepository(table)
+    mastery = MasteryState("learner", Topic.ARRAYS, 5, 0.9)
+    repo.save(mastery)
+    assert table.get_item(Key={})["Item"]["confidence"] == Decimal("0.9")
+    loaded = repo.get("learner", Topic.ARRAYS)
+    assert loaded == mastery
+    assert type(loaded.score) is int
+    assert type(loaded.confidence) is float
+
+
+def test_learner_uses_real_dynamo_number_round_trip():
+    repo = LearnerRepository(DynamoNumberTable())
+    learner = LearnerState("learner", False, 2, 1)
+    repo.save(learner)
+    assert repo.get("learner") == learner
+
+
+def test_every_deployed_seed_loads_after_dynamo_serialization():
+    from scripts.seed_questions import _dynamo_item
+    from backend.repositories import _question_from_item
+    corpus = json.loads((Path(__file__).resolve().parents[1] / "seed/questions.json").read_text())
+    for seed in corpus["questions"]:
+        table = DynamoNumberTable()
+        table.put_item(Item=_dynamo_item(seed, corpus["version"]))
+        question = _question_from_item(table.get_item(Key={})["Item"])
+        assert question.question_id == seed["question_id"]
+        assert type(question.difficulty) is int
+        # Nested numbers must also work in JSON payloads and code execution.
+        json.dumps([{ "input": case.input_data, "expected": case.expected_output }
+                    for case in question.hidden_tests])
+
+
 class FakeTable:
     def __init__(self):
         self.items = {}
@@ -39,7 +92,7 @@ class FakeTable:
             raise ConditionalCheckFailedException()
         self.items[tuple(item.get(key) for key in ("learnerId", "questionId", "learnerTopic"))] = item
 
-    def get_item(self, *, Key):
+    def get_item(self, *, Key, **kwargs):
         return {"Item": self.items.get(tuple(Key.get(key) for key in ("learnerId", "questionId", "learnerTopic")))}
 
     def query(self, **kwargs):

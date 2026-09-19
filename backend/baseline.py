@@ -30,11 +30,16 @@ def _questions(repo: Any) -> list[Question]:
     raise TypeError("question repository must provide all/list or a scan-capable table")
 
 
-def _baseline_question(question_repo: Any, topic: Topic, difficulty: int) -> Question:
-    candidates = [q for q in _questions(question_repo) if q.topic is topic and q.difficulty == difficulty]
+def _baseline_question(question_repo: Any, topic: Topic, difficulty: int, questions=None) -> Question:
+    candidates = [q for q in (questions if questions is not None else _questions(question_repo)) if q.topic is topic and q.difficulty == difficulty and q.provenance.value == "seeded"]
     if not candidates:
         raise LookupError(f"no baseline question for {topic.value} at difficulty {difficulty}")
     return sorted(candidates, key=lambda q: q.question_id)[0]
+
+
+def baseline_questions(question_repo):
+    questions = _questions(question_repo)
+    return [_baseline_question(question_repo, topic, difficulty, questions) for topic, difficulty in BASELINE_TARGETS]
 
 
 def _answered(attempt_repo: Any, learner_id: str, question_id: str) -> bool:
@@ -45,8 +50,7 @@ def get_baseline_next(learner_id: str, learner_repo: Any, question_repo: Any, at
     learner = init_learner(learner_repo, learner_id)
     if learner.baseline_completed:
         return None
-    for topic, difficulty in BASELINE_TARGETS:
-        question = _baseline_question(question_repo, topic, difficulty)
+    for question in baseline_questions(question_repo):
         if not _answered(attempt_repo, learner_id, question.question_id):
             return question
     return None
@@ -67,7 +71,8 @@ def submit_baseline(
         return learner
 
     question = question_repo.get(question_id)
-    if question is None or (question.topic, question.difficulty) not in BASELINE_TARGETS:
+    fixed_questions = baseline_questions(question_repo)
+    if question is None or question_id not in {q.question_id for q in fixed_questions}:
         raise ValueError("question_id is not a baseline question")
     passed = result.passed if isinstance(result, SubmissionVerdict) else result
     if not isinstance(passed, bool):
@@ -77,8 +82,7 @@ def submit_baseline(
     score = max(1, min(10, question.difficulty + (1 if passed else -1)))
     mastery_repo.save(MasteryState(learner_id, question.topic, score))
     completed = all(
-        _answered(attempt_repo, learner_id, _baseline_question(question_repo, topic, difficulty).question_id)
-        for topic, difficulty in BASELINE_TARGETS
+        _answered(attempt_repo, learner_id, q.question_id) for q in fixed_questions
     )
     learner = init_learner(learner_repo, learner_id)
     updated = LearnerState(learner_id, completed, learner.run_check_actions, learner.generation_requests)

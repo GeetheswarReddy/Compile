@@ -1,15 +1,7 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
+import App from './App';
 import './styles/global.css';
-
-function Foundation() {
-  return (
-    <main className="app-shell">
-      <h1>Compile</h1>
-      <p>Adaptive Python practice is loading.</p>
-    </main>
-  );
-}
 
 const rootElement = document.getElementById('root');
 
@@ -19,6 +11,6 @@ if (!rootElement) {
 
 createRoot(rootElement).render(
   <React.StrictMode>
-    <Foundation />
+    <App />
   </React.StrictMode>,
 );

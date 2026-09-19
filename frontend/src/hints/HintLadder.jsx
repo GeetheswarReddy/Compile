@@ -67,7 +67,7 @@ export default function HintLadder({ questionId, onHint, disabled = false, class
           {hints.map((hint, index) => (
             <article className="hint-ladder__hint" key={`${hint.level}-${index}`}>
               <h3>{hint.name}</h3>
-              <p>{hint.text || 'Hint received.'}</p>
+              {hint.level === 4 ? <pre><code>{hint.text}</code></pre> : <p>{hint.text || 'Hint received.'}</p>}
             </article>
           ))}
         </div>

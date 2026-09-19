@@ -44,3 +44,8 @@ button {
   color: #94a3b8;
   margin: 0.75rem 0 0;
 }
+
+.practice-history { max-width: 960px; margin: 2rem auto; padding: 0 1.5rem; }
+.practice-history article { margin: 0.8rem 0; }
+.practice-history article > button { text-align: left; padding: 0.8rem 1rem; border: 1px solid #d9e2dc; border-radius: 10px; background: white; cursor: pointer; width: 100%; }
+.question-examples pre { white-space: pre-wrap; overflow-wrap: anywhere; padding: 0.8rem; background: #f4f6f4; border-radius: 8px; }

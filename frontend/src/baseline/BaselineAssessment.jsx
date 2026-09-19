@@ -1,3 +1,4 @@
+import QuestionExamples from '../practice/QuestionExamples';
 import React, { useEffect, useState } from 'react';
 import { useBaseline } from './useBaseline';
 import './baseline.css';
@@ -43,9 +44,11 @@ export function BaselineAssessment() {
     return <main className="baseline-page"><section className="baseline-card baseline-state" role="alert"><p className="baseline-eyebrow">Compile baseline</p><h1>We couldn’t load your assessment.</h1><p>{error.message}</p><button className="baseline-button" onClick={retry}>Try again</button></section></main>;
   }
 
-  if (completed || !question) {
-    return <main className="baseline-page"><section className="baseline-card baseline-state"><p className="baseline-eyebrow">Baseline complete</p><h1>Your starting point is ready.</h1><p>We’ll use these answers to tune practice to your current level.</p></section></main>;
+  if (completed) {
+    return <main className="baseline-page"><section className="baseline-card baseline-state"><p className="baseline-eyebrow">Baseline complete</p><h1>Your starting point is ready.</h1><p>We’ll use these answers to tune practice to your current level.</p><a className="baseline-button" href="/">Choose a practice topic</a></section></main>;
   }
+
+  if (!question) return <main className="baseline-page"><p>No assessment question is available. Please retry.</p><button onClick={retry}>Retry</button></main>;
 
   const current = Math.min(answered + 1, total);
   const constraints = constraintsText(question.constraints);
@@ -58,8 +61,9 @@ export function BaselineAssessment() {
           {Array.from({ length: total }, (_, index) => <span aria-hidden="true" className={`baseline-dot ${index < answered ? 'is-done' : ''} ${index === answered ? 'is-current' : ''}`} key={index} />)}
         </div>
         <p className="baseline-topic">{labelForTopic(question.topic)}</p>
-        <div className="baseline-meta"><span>Difficulty {question.difficultyScore}/10</span>{question.techniqueTag && <span>{question.techniqueTag}</span>}</div>
+        <div className="baseline-meta"><span>Difficulty {question.difficulty}/10</span></div>
         <h1 id="baseline-title">{question.prompt}</h1>
+        <QuestionExamples examples={question.examples} />
         {question.functionSignature && <pre className="baseline-signature"><code>{question.functionSignature}</code></pre>}
         {constraints && <div className="baseline-constraints"><h2>Constraints</h2><p>{constraints}</p></div>}
         <form onSubmit={onSubmit}>

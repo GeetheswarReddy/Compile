@@ -36,7 +36,7 @@ export function DemoTrace({ enabled }) {
       {!loading && !error && entries.length > 0 && (
         <ol className="demo-trace__list">
           {entries.map((entry, index) => {
-            const snapshot = entry.masterySnapshot;
+            const snapshot = entry.masterySnapshot || {};
             return (
               <li className="demo-trace__item" key={`${entry.eventTimestamp}-${index}`}>
                 <div className="demo-trace__item-header">
@@ -54,7 +54,7 @@ export function DemoTrace({ enabled }) {
                   </div>
                   <div>
                     <dt>Mastery snapshot</dt>
-                    <dd>{snapshot.mastery}/10</dd>
+                    <dd>{snapshot.score ?? snapshot.mastery ?? "—"}/10</dd>
                   </div>
                   <div>
                     <dt>Confidence</dt>

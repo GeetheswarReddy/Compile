@@ -9,7 +9,7 @@ from typing import Any, Mapping
 from uuid import uuid4
 
 from .contracts import PreparedQuestion, Provenance, Question, TestCase, Topic
-from .execution_runner import verify_question
+from .execution_client import verify_question
 
 PREPARED_TTL = timedelta(minutes=30)
 
@@ -28,7 +28,7 @@ def _candidate_value(candidate: Any) -> Any:
         return _candidate_value(candidate["question"])
     if isinstance(candidate, str):
         value = json.loads(candidate)
-        return value
+        return _candidate_value(value)
     if isinstance(candidate, Mapping):
         topic = candidate.get("topic")
         tests = candidate.get("hiddenTests", candidate.get("hidden_tests"))
@@ -37,11 +37,11 @@ def _candidate_value(candidate: Any) -> Any:
         if not isinstance(tests, (list, tuple)):
             raise ValueError("candidate hiddenTests are required")
         hidden = tuple(
-            test if isinstance(test, TestCase) else TestCase(test.get("input_data", test.get("input")), test.get("expected_output", test.get("expected")))
+            test if isinstance(test, TestCase) else TestCase(test.get("input_data", test.get("input")), test.get("expected_output", test.get("expected")), test.get("positional", "input" in test))
             for test in tests
         )
         return Question(
-            question_id=candidate.get("questionId", candidate.get("question_id", str(uuid4()))),
+            question_id="generated-" + str(uuid4()),
             topic=topic,
             difficulty=int(candidate["difficulty"]),
             prompt=candidate["prompt"],
@@ -84,8 +84,8 @@ def handle_generated_candidate(
 ) -> dict[str, Any]:
     """Verify one candidate, persist it separately, or return a fallback.
 
-    A candidate whose generation deadline has elapsed is discarded and does
-    not increment the failure counter.  ``event`` may contain the candidate
+    Verification continues after the browser fallback deadline. A candidate
+    outside the current mastery range is discarded without a failure increment.  ``event`` may contain the candidate
     directly or under ``candidate``/``question``; this accommodates the
     Bedrock task's compact output and direct unit-test calls.
     """
@@ -105,14 +105,28 @@ def handle_generated_candidate(
             question_repository = question_repository or deps["question_repository"]
             mastery_repository = mastery_repository or deps["mastery_repository"]
         return _fallback(learner_id, topic, mastery_repository, question_repository)
-    deadline = event.get("deadline") or event.get("generationDeadline")
-    if isinstance(deadline, str):
-        deadline = datetime.fromisoformat(deadline)
-    if event.get("stale") is True or (deadline is not None and current >= deadline):
+    if event.get("stale") is True:
         return {"status": "stale", "discarded": True}
+    if verifier is verify_question:
+        from .dependencies import compose_dependencies
+        deps = compose_dependencies()
+        mastery_repository = mastery_repository or deps["mastery_repository"]
+        question_repository = question_repository or deps["question_repository"]
+        prepared_repository = prepared_repository or deps["prepared_repository"]
+        if not deps["demo_quota"].consume():
+            return {**dict(event), "status": "stale", "discarded": True}
     candidate = event.get("candidate", event.get("question"))
     try:
         question = _candidate_value(candidate)
+        if mastery_repository is not None:
+            mastery = mastery_repository.get(learner_id, topic)
+            if mastery and abs(question.difficulty - mastery.score) > 1:
+                return {**dict(event), "status": "stale", "discarded": True}
+        if question_repository is not None:
+            from .question_select import _all
+            prior = _all(question_repository)
+            if any(q.prompt.strip().lower() == question.prompt.strip().lower() or q.reference_solution.strip() == question.reference_solution.strip() for q in prior):
+                raise ValueError("candidate duplicates an existing question")
         if question.topic is not topic or not verifier(question):
             raise ValueError("candidate failed verification")
     except Exception:
@@ -129,6 +143,8 @@ def handle_generated_candidate(
     if prepared_repository is None:
         from .dependencies import compose_dependencies
         prepared_repository = compose_dependencies()["prepared_repository"]
+    from dataclasses import replace
+    question = replace(question, verification_retries=max(0, int(event.get("attempt", 1)) - 1))
     expires_at = current + PREPARED_TTL
     prepared_repository.save(PreparedQuestion(learner_id, topic, question, expires_at))
     return {"status": "accepted", "questionId": question.question_id, "expiresAt": expires_at.isoformat()}
@@ -143,13 +159,18 @@ def generate_candidate(event: Mapping[str, Any], context: Any = None, *, bedrock
     model_id = os.environ.get("BEDROCK_MODEL_ID")
     if not model_id:
         raise RuntimeError("BEDROCK_MODEL_ID is not configured")
+    from .dependencies import compose_dependencies
+    from .question_select import _all
+    corpus = _all(compose_dependencies()["question_repository"])
+    references = [{"prompt": q.prompt, "difficulty": q.difficulty} for q in corpus if q.topic.value == event.get("topic")]
     response = bedrock_client.converse(
         modelId=model_id,
-        system=[{"text": "Return only one JSON coding-question object with questionId, topic, difficulty, prompt, starterCode, hiddenTests, and referenceSolution."}],
-        messages=[{"role": "user", "content": [{"text": json.dumps({"topic": event.get("topic"), "mastery": event.get("mastery")})}]}],
+        inferenceConfig={"maxTokens": 2500, "temperature": 0.7},
+        system=[{"text": "Return only a JSON coding-question object with topic, integer difficulty (1-10), prompt, starterCode, hiddenTests, and referenceSolution. Use the exact requested topic and mastery as difficulty. Include a named Python function with typed parameters and return type in starterCode. Describe constraints and examples in prompt. Include 2 or 3 hiddenTests, each with input (a list of positional arguments; wrap a single list argument in another list) and expected_output. ReferenceSolution must implement the named function. Create a materially different exercise from the supplied existing prompts. No markdown fences."}],
+        messages=[{"role": "user", "content": [{"text": json.dumps({"topic": event.get("topic"), "mastery": event.get("mastery"), "existingQuestions": references})}]}],
     )
     text = "".join(item.get("text", "") for item in response.get("output", {}).get("message", {}).get("content", []))
-    return {**dict(event), "candidate": json.loads(text)}
+    return {**dict(event), "candidate": json.loads(text.strip().removeprefix("```json").removesuffix("```").strip())}
 
 
 __all__ = ["PREPARED_TTL", "generate_candidate", "handle_generated_candidate"]

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .contracts import MasteryState, PreparedQuestion, Question, Topic
+from .contracts import MasteryState, PreparedQuestion, Question, Topic, Provenance
 
 
 def _all(repo: Any) -> list[Question]:
@@ -35,22 +35,28 @@ def get_next_question(
         raise ValueError("learner_id must be a non-empty string")
     if not isinstance(topic, Topic):
         topic = Topic(topic)
+    mastery = mastery_repo.get(learner_id, topic) or MasteryState(learner_id, topic, 1)
     if prepared_repo is not None:
         prepared = prepared_repo.consume(learner_id, topic) if hasattr(prepared_repo, "consume") else prepared_repo.get(learner_id, topic)
-        if isinstance(prepared, PreparedQuestion) and not _attempted(attempt_repo, learner_id, prepared.question.question_id):
+        if isinstance(prepared, PreparedQuestion) and abs(prepared.question.difficulty - mastery.score) <= 1 and not _attempted(attempt_repo, learner_id, prepared.question.question_id):
+            if hasattr(question_repo, "save_for_learner"):
+                question_repo.save_for_learner(prepared.question, learner_id)
+            else:
+                question_repo.save(prepared.question)
             return prepared.question
     mastery = mastery_repo.get(learner_id, topic)
     if mastery is None:
         mastery = MasteryState(learner_id, topic, 1)
+    pool = question_repo.for_learner(learner_id) if hasattr(question_repo, "for_learner") else _all(question_repo)
     available = [
-        q for q in _all(question_repo)
+        q for q in pool
         if q.topic is topic and not _attempted(attempt_repo, learner_id, q.question_id)
     ]
     if not available:
         if prepared_repo is not None:
             prepared_repo.delete(learner_id, topic)
         return None
-    return min(available, key=lambda q: (abs(q.difficulty - mastery.score), q.question_id))
+    return min(available, key=lambda q: (0 if q.provenance is Provenance.GENERATED and abs(q.difficulty - mastery.score) <= 1 else 1, abs(q.difficulty - mastery.score), q.question_id))
 
 
 __all__ = ["get_next_question"]

@@ -52,8 +52,11 @@ def _require_score(value: int, field_name: str) -> None:
 class TestCase:
     """A private execution test retained only inside backend domain objects."""
 
+    __test__ = False
+
     input_data: Any
     expected_output: Any
+    positional: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +80,9 @@ class Question:
     hidden_tests: tuple[TestCase, ...]
     reference_solution: str
     provenance: Provenance
+    technique_tag: str = ""
+    examples: tuple[TestCase, ...] = ()
+    verification_retries: int = 0
 
     def __post_init__(self) -> None:
         _require_non_empty(self.question_id, "question_id")
@@ -187,6 +193,8 @@ def serialize_question(question: Question) -> dict[str, Any]:
         "prompt": question.prompt,
         "starterCode": question.starter_code,
         "provenance": question.provenance.value,
+        "techniqueTag": question.technique_tag,
+        "examples": [{"input": case.input_data, "expected": case.expected_output} for case in question.examples],
     }
 
 

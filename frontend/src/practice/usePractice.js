@@ -1,45 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiClient } from '../api/client';
 
-function unwrapQuestion(payload) {
-  if (!payload || typeof payload !== 'object') return null;
-  const candidate = payload.question && typeof payload.question === 'object' ? payload.question : payload;
-  return candidate.question && typeof candidate.question === 'object' ? candidate.question : candidate;
-}
-
-function readOnlyFrom(payload, question) {
-  const learner = payload?.learner || payload?.learnerState || payload?.state || {};
-  const quota = payload?.quota || {};
-  const executionCount = learner.runCheckActions ?? quota.runCheckActions;
-  const generationCount = learner.generationRequests ?? quota.generationRequests;
-  return Boolean(
-    payload?.readOnly ||
-      payload?.isReadOnly ||
-      quota.readOnly ||
-      learner.readOnly ||
-      executionCount >= 5 ||
-      generationCount >= 2 ||
-      question?.readOnly,
-  );
-}
-
-function boundedFailures(verdict) {
-  const failures = Array.isArray(verdict?.failedCases)
-    ? verdict.failedCases
-    : Array.isArray(verdict?.failures)
-      ? verdict.failures
-      : [];
-  return failures.slice(0, 2);
-}
-
-function normalizeVerdict(payload) {
-  if (!payload || typeof payload !== 'object') return null;
-  return {
-    ...payload,
-    passed: Boolean(payload.passed ?? payload.correct),
-    failedCases: boundedFailures(payload),
-  };
-}
+import { unwrapQuestion, readOnlyFrom, boundedFailures, normalizeVerdict } from '../api/contracts';
 
 export function usePractice(topicId) {
   const [question, setQuestion] = useState(null);
@@ -90,6 +52,7 @@ export function usePractice(topicId) {
       if (readOnlyFrom(payload, question)) setReadOnly(true);
       return nextVerdict;
     } catch (requestError) {
+      if (requestError.status === 429) setReadOnly(true);
       setError(requestError?.message || 'Run & Check could not be completed.');
       return null;
     } finally {
@@ -103,7 +66,11 @@ export function usePractice(topicId) {
     setError('');
     setVerdict(null);
     try {
-      const payload = await apiClient.generate({ topicId });
+      await apiClient.generate({ topicId });
+      // The worker continues after this bounded browser wait. Late results are
+      // offered on the next question request if still near current mastery.
+      await new Promise((resolve) => setTimeout(resolve, 8000));
+      const payload = await apiClient.getNextQuestion(topicId);
       const nextQuestion = unwrapQuestion(payload);
       if (nextQuestion) {
         setQuestion(nextQuestion);
@@ -113,6 +80,7 @@ export function usePractice(topicId) {
       setReadOnly(readOnlyFrom(payload, nextQuestion) || readOnly);
       return nextQuestion;
     } catch (requestError) {
+      if (requestError.status === 429) setReadOnly(true);
       setError(requestError?.message || 'Question generation could not be completed.');
       return null;
     } finally {
@@ -138,4 +106,4 @@ export function usePractice(topicId) {
   }), [code, error, generate, generating, loadQuestion, loading, question, readOnly, runCheck, submitting, tagRevealed, verdict]);
 }
 
-export { boundedFailures, normalizeVerdict };
+export { boundedFailures, normalizeVerdict, unwrapQuestion };

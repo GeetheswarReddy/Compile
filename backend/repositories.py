@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from datetime import datetime
+from decimal import Decimal
 from typing import Any, Mapping
 from uuid import uuid4
 
@@ -30,6 +31,8 @@ def _value(value: Any) -> Any:
         return value.value
     if isinstance(value, datetime):
         return value.isoformat()
+    if isinstance(value, float):
+        return Decimal(str(value))
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     if isinstance(value, tuple):
@@ -41,6 +44,17 @@ def _value(value: Any) -> Any:
     return value
 
 
+def _from_dynamo(value: Any) -> Any:
+    """Restore Python numbers at the persistence boundary, including test data."""
+    if isinstance(value, Decimal):
+        return int(value) if value == value.to_integral_value() else float(value)
+    if isinstance(value, list):
+        return [_from_dynamo(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _from_dynamo(item) for key, item in value.items()}
+    return value
+
+
 def _question_item(question: Question) -> dict[str, Any]:
     return {
         "questionId": question.question_id,
@@ -48,21 +62,28 @@ def _question_item(question: Question) -> dict[str, Any]:
         "difficulty": question.difficulty,
         "prompt": question.prompt,
         "starterCode": question.starter_code,
-        "hiddenTests": [_value(asdict(test)) for test in question.hidden_tests],
+        "hiddenTests": [_value({**asdict(test), "positional": test.positional or isinstance(test.input_data, tuple)}) for test in question.hidden_tests],
         "referenceSolution": question.reference_solution,
         "provenance": question.provenance.value,
+        "techniqueTag": question.technique_tag,
+        "tests": [_value(asdict(test)) for test in question.examples],
+        "verificationRetries": question.verification_retries,
     }
 
 
 def _question_from_item(item: Mapping[str, Any]) -> Question:
+    item = _from_dynamo(dict(item))
     tests = tuple(
-        TestCase(t.get("input_data", t.get("input")), t.get("expected_output", t.get("expected")))
+        TestCase(t.get("input_data", t.get("input")), t.get("expected_output", t.get("expected")), t.get("positional", "input" in t))
         for t in item["hiddenTests"]
     )
     return Question(
         question_id=item["questionId"], topic=Topic(item["topic"]), difficulty=int(item["difficulty"]),
         prompt=item["prompt"], starter_code=item.get("starterCode", ""), hidden_tests=tests,
         reference_solution=item["referenceSolution"], provenance=Provenance(item["provenance"]),
+        technique_tag=item.get("techniqueTag", ""),
+        examples=tuple(TestCase(t.get("input", t.get("input_data")), t.get("expected_output", t.get("expected")), True) for t in item.get("tests", [])),
+        verification_retries=int(item.get("verificationRetries", 0)),
     )
 
 
@@ -80,7 +101,7 @@ class _Repository:
         self.table = table
 
     def _get(self, key: dict[str, Any]) -> dict[str, Any] | None:
-        return self.table.get_item(Key=key).get("Item")
+        return _from_dynamo(self.table.get_item(Key=key, ConsistentRead=True).get("Item"))
 
 
 class LearnerRepository(_Repository):
@@ -105,7 +126,7 @@ class MasteryRepository(_Repository):
     def save(self, mastery: MasteryState) -> MasteryState:
         existing = self._get({"learnerId": mastery.learner_id, "topic": mastery.topic.value})
         self.table.put_item(Item={"learnerId": mastery.learner_id, "topic": mastery.topic.value,
-                                  "score": mastery.score, "confidence": mastery.confidence,
+                                  "score": mastery.score, "confidence": _value(mastery.confidence),
                                   "generationFailureCount": (existing or {}).get("generationFailureCount", 0)})
         return mastery
 
@@ -120,6 +141,21 @@ class MasteryRepository(_Repository):
 
 
 class QuestionRepository(_Repository):
+    def save_for_learner(self, question, learner_id):
+        self.table.put_item(Item={**_question_item(question), "ownerLearnerId": learner_id})
+        return question
+
+    def for_learner(self, learner_id):
+        items = []
+        kwargs = {}
+        while True:
+            response = self.table.scan(**kwargs)
+            items.extend(_question_from_item(item) for item in response.get("Items", [])
+                         if item.get("provenance") != "generated" or item.get("ownerLearnerId") == learner_id)
+            if not response.get("LastEvaluatedKey"):
+                return items
+            kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
+
     def get(self, question_id: str) -> Question | None:
         item = self._get({"questionId": question_id})
         return None if item is None else _question_from_item(item)
