@@ -69,6 +69,10 @@ def emit(payload):
     data = json.dumps(payload, separators=(",", ":")).encode()
     os.write(198, data if len(data) < 4000 else b'{"passed":false,"failed":[]}')
 
+# Load the standard exercise libraries before closing filesystem access.
+# Imports of these modules still work from sys.modules after the filter.
+import bisect, collections, functools, heapq, itertools, math, operator
+import random, re, statistics, string, typing
 __SANDBOX__
 restrict_child()
 

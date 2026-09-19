@@ -137,7 +137,6 @@ def create_reflection(
             "contentType": content_type,
             "createdAt": current.isoformat(),
             "expiresAt": expires_at.isoformat(),
-            "ttl": int(expires_at.timestamp()),
         }
         repository.save(learner_id, question_id, metadata)
         return _response(201, {"uploadUrl": upload_url, **metadata})

@@ -20,6 +20,8 @@ async function request(path, { method = 'GET', body, signal } = {}) {
     signal,
   });
 
+  if (response.status === 204) return null;
+
   const contentType = response.headers.get('content-type') || '';
   const payload = contentType.includes('application/json')
     ? await response.json()

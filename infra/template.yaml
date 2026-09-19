@@ -107,7 +107,6 @@ Resources:
   ReflectionsTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TimeToLiveSpecification: {AttributeName: ttl, Enabled: true}
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - {AttributeName: learnerId, AttributeType: S}

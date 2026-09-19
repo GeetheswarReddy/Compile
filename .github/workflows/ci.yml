@@ -17,7 +17,7 @@ jobs:
       - run: python -m pytest -q
       - run: npm ci --prefix frontend
       - run: npm test --prefix frontend
-      - run: npm run build --prefix frontend
+      - run: npm run test:app --prefix frontend
         env:
           VITE_API_BASE_URL: https://example.execute-api.ap-southeast-2.amazonaws.com/v1
           VITE_DEMO_TRACE: 'true'

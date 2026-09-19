@@ -74,3 +74,4 @@ def test_linux_kernel_restrictions_block_raw_socket_and_process_creation():
     # _socket bypasses the friendly import blacklist; the kernel must deny it.
     assert not run_submission(question, 'def solve(items):\n    import _socket\n    _socket.socket()\n    return items[0]').passed
     assert not run_submission(question, 'def solve(items):\n    import os\n    os.fork()\n    return items[0]').passed
+    assert not run_submission(question, 'def solve(items):\n    open("/proc/self/environ").read()\n    return items[0]').passed

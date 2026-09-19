@@ -12,7 +12,7 @@ python3.12 -m venv .venv
 npm ci --prefix frontend
 .venv/bin/python -m pytest -q
 npm test --prefix frontend
-npm run build --prefix frontend
+npm run test:app --prefix frontend
 sam validate --lint --template-file infra/template.yaml
 sam build --template-file infra/template.yaml
 ```
@@ -32,7 +32,7 @@ sam deploy --template-file .aws-sam/build/template.yaml \
   --stack-name compile-v2 --region ap-southeast-2 --resolve-s3
 ```
 
-Review the change set and approve the update. The template adds a quota table and a private execution Lambda in a VPC with no internet route, no DNS, and a deny-all network ACL. The executor has no database, S3, or Bedrock permissions. API and verification functions invoke it privately; learner code does not run inside their privileged processes. Linux child restrictions additionally deny network/process creation syscalls and apply time/memory limits. This is a bounded anonymous demo, not an authenticated production learning service.
+Review the change set and approve the update. The template adds a quota table and a private execution Lambda in a VPC with no internet route, no DNS, and a deny-all network ACL. The executor has no database, S3, or Bedrock permissions. API and verification functions invoke it privately; learner code does not run inside their privileged processes. Linux child restrictions additionally deny filesystem access and network/process creation syscalls and apply time/memory limits. This is a bounded anonymous demo, not an authenticated production learning service.
 
 Generation uses `amazon.nova-lite-v1:0` by default. Its role permits `bedrock:InvokeModel`, as required by the [Converse API](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html). The browser waits eight seconds before loading the nearest seed; the worker continues for up to three candidates and can retain a late verified question. Prepared questions expire after 30 minutes and must remain within one point of mastery when selected. Exact duplicate prompts/reference implementations are rejected; semantic originality is requested from the model but is not a formal guarantee.
 
@@ -71,7 +71,7 @@ DynamoDB transactions enforce a shared ceiling of **40 executions** and **20 gen
 
 Budgets do not reset automatically. An operator can reset the `execution_submissions` and `generation_attempts` attributes on the `quotaId=demo` record in the stack’s `QuotasTable`. Learner counters live separately in `LearnersTable`; a shared reset does not reset individual limits. Stop active demo traffic before an intentional reset.
 
-Recordings use presigned PUT/GET URLs, a private encrypted S3 bucket, browser CORS, a 30-day lifecycle, and metadata TTL. Playback URLs last 15 minutes; expired metadata cannot issue new playback URLs. Replacing a recording requires explicit confirmation; delete removes its object and metadata immediately. The anonymous browser identity acts as the access key: clearing browser storage loses access to its progress and recordings.
+Recordings use presigned PUT/GET URLs, a private encrypted S3 bucket, browser CORS, a 30-day object lifecycle, and an explicit metadata expiry check. Playback URLs last 15 minutes; expired metadata cannot issue new playback URLs. The existing DynamoDB table’s TTL configuration is left unchanged to keep updates and rollbacks outside its one-hour reconfiguration cooldown. Replacing a recording requires explicit confirmation; delete removes its object and metadata immediately. The anonymous browser identity acts as the access key: clearing browser storage loses access to its progress and recordings.
 
 ## Structure
 
