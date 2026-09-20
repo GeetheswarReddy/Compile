@@ -122,6 +122,7 @@ test('practice workspace keeps question, trace, editor, actions, and bounded res
     assert.ok(questionPane.textContent.includes('Generated for your level'));
     assert.ok(questionPane.textContent.includes('Input: [[7,8]]'));
     assert.ok(questionPane.textContent.includes('1 <= len(values) <= 100'));
+    await eventually(() => solutionPane.querySelector('.cm-content[role="textbox"][aria-label="Your Python solution"]'), 'practice editor mounts');
     const editorContent = solutionPane.querySelector('.cm-content[role="textbox"][aria-label="Your Python solution"]');
     assert.ok(editorContent);
     assert.ok(EditorView.findFromDOM(editorContent.closest('.cm-editor')));
@@ -181,8 +182,11 @@ test('baseline uses the same question-left and solution-right landmark order', a
     assert.ok(questionPane.compareDocumentPosition(solutionPane) & Node.DOCUMENT_POSITION_FOLLOWING);
     assert.ok(questionPane.textContent.includes(question.prompt));
     assert.ok(questionPane.textContent.includes('values contain integers'));
-    assert.ok(solutionPane.querySelector('#baseline-code'));
-    assert.equal(solutionPane.querySelector('button[type="submit"]')?.textContent, 'Continue');
+    await eventually(() => solutionPane.querySelector('.cm-content[aria-label="Your Python solution"]'), 'baseline editor mounts');
+    assert.ok(solutionPane.querySelector('.cm-content[aria-label="Your Python solution"]'));
+    assert.ok(solutionPane.querySelector('.cm-lineNumbers'));
+    assert.equal(solutionPane.querySelector('.practice-editor__language')?.textContent, 'Python');
+    assert.equal(solutionPane.querySelector('button[type="submit"]')?.textContent, 'Run & Check');
     assert.deepEqual(app.errors, []);
   } finally {
     app.close();

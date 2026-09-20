@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiClient } from '../api/client';
-import { isAbortError, isQuotaError } from '../api/contracts';
+import { isAbortError, isQuotaError, normalizeVerdict } from '../api/contracts';
 import { getLearnerId } from '../identity/learnerId';
 
 const DEFAULT_TOTAL = 5;
@@ -25,6 +25,8 @@ export function useBaseline() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [errorOperation, setErrorOperation] = useState(null);
+  const [verdict, setVerdict] = useState(null);
+  const [pendingAdvance, setPendingAdvance] = useState(null);
   const abortRef = useRef(null);
   const submitAbortRef = useRef(null);
   const loadSequenceRef = useRef(0);
@@ -39,6 +41,8 @@ export function useBaseline() {
     setLoading(true);
     setError(null);
     setErrorOperation(null);
+    setVerdict(null);
+    setPendingAdvance(null);
 
     try {
       getLearnerId();
@@ -86,11 +90,16 @@ export function useBaseline() {
         { signal: controller.signal },
       );
       if (controller.signal.aborted || !mountedRef.current) return null;
-      const progress = progressFrom(payload);
-      setQuestion(payload?.question || null);
-      setAnswered(Math.min(progress.answered, progress.total));
-      setTotal(progress.total);
-      setCompleted(Boolean(payload?.completed));
+      if (typeof payload?.verdict?.passed === 'boolean') {
+        setVerdict(normalizeVerdict(payload.verdict));
+        setPendingAdvance(payload);
+      } else {
+        const progress = progressFrom(payload);
+        setQuestion(payload?.question || null);
+        setAnswered(Math.min(progress.answered, progress.total));
+        setTotal(progress.total);
+        setCompleted(Boolean(payload?.completed));
+      }
       return payload;
     } catch (requestError) {
       if (!isAbortError(requestError) && mountedRef.current) {
@@ -105,6 +114,19 @@ export function useBaseline() {
     }
   }, [question]);
 
+  const advance = useCallback(() => {
+    if (!pendingAdvance) return;
+    const progress = progressFrom(pendingAdvance);
+    setQuestion(pendingAdvance.question || null);
+    setAnswered(Math.min(progress.answered, progress.total));
+    setTotal(progress.total);
+    setCompleted(Boolean(pendingAdvance.completed));
+    setVerdict(null);
+    setPendingAdvance(null);
+    setError(null);
+    setErrorOperation(null);
+  }, [pendingAdvance]);
+
   return {
     question,
     answered,
@@ -114,8 +136,11 @@ export function useBaseline() {
     submitting,
     error,
     errorOperation,
+    verdict,
+    canAdvance: Boolean(pendingAdvance),
     quotaExhausted: isQuotaError(error),
     retry: load,
     submit,
+    advance,
   };
 }

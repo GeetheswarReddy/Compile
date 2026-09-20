@@ -90,6 +90,16 @@
   background: #111113;
 }
 
+.baseline-solution-pane .practice-editor {
+  min-height: 12rem;
+  flex: 1 1 auto;
+  height: auto;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: #111113;
+}
+
 .baseline-dot.is-current {
   box-shadow: 0 0 0 3px rgb(242 184 75 / 15%);
 }
@@ -225,6 +235,76 @@
 .baseline-submit-error p + p {
   margin-top: var(--space-2);
   color: #e4b6b6;
+}
+
+.baseline-check-help {
+  margin: var(--space-3) 0 0;
+  color: var(--color-text-subtle);
+  font-size: 0.74rem;
+  line-height: 1.45;
+}
+
+.baseline-verdict {
+  max-height: min(35%, 14rem);
+  flex: 0 1 auto;
+  margin-top: var(--space-3);
+  overflow-y: auto;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  scrollbar-gutter: stable;
+}
+
+.baseline-verdict.is-pass {
+  border: 1px solid #315d45;
+  color: var(--color-success);
+  background: var(--color-success-surface);
+}
+
+.baseline-verdict.is-fail {
+  border: 1px solid #6c5630;
+  color: var(--color-warning);
+  background: var(--color-warning-surface);
+}
+
+.baseline-verdict h2 {
+  margin: 0;
+  color: inherit;
+  font-size: 1rem;
+}
+
+.baseline-verdict p {
+  margin: var(--space-2) 0;
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+}
+
+.baseline-verdict .baseline-verdict__label {
+  margin: 0 0 var(--space-1);
+  color: inherit;
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.baseline-verdict ul {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-5);
+}
+
+.baseline-verdict li {
+  display: grid;
+  gap: var(--space-1);
+  color: var(--color-text-muted);
+  font-size: 0.76rem;
+}
+
+.baseline-verdict code {
+  color: var(--color-text);
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
 }
 
 .baseline-button {

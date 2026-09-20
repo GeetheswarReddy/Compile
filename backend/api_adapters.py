@@ -7,7 +7,7 @@ import os
 from typing import Any, Callable, Mapping
 
 from . import baseline, generation_orchestrator, hints, learner_state, question_select, reflection, run_check
-from .contracts import Question, Topic, serialize_learner_state, serialize_question
+from .contracts import Question, Topic, serialize_learner_state, serialize_question, serialize_verdict
 from .dependencies import compose_dependencies
 from .execution_client import run_submission
 import logging
@@ -59,6 +59,23 @@ def _public_question(question: Question | None) -> dict[str, Any] | None:
 def _answered(deps, learner_id):
     return sum(deps["attempt_repository"].get(learner_id, q.question_id) is not None
         for q in baseline.baseline_questions(deps["question_repository"]))
+
+
+def _stored_verdict(attempt: Mapping[str, Any]) -> dict[str, Any]:
+    """Recreate the public verdict for an idempotent baseline retry."""
+
+    return {
+        "passed": bool(attempt.get("passed")),
+        "failedCases": [
+            {
+                "input": item.get("input_data", item.get("input")),
+                "expected": item.get("expected_output", item.get("expected")),
+                "actual": item.get("actual_output", item.get("actual")),
+            }
+            for item in attempt.get("failedCases", [])[:2]
+            if isinstance(item, Mapping)
+        ],
+    }
 
 
 def _gate(deps, learner_id):
@@ -125,16 +142,18 @@ def baseline_submit(event: Mapping[str, Any], context: Any) -> dict[str, Any]:
         if question is None:
             return _response(404, {"error": "question not found"})
         current = baseline.get_baseline_next(learner_id, deps["learner_repository"], deps["question_repository"], deps["attempt_repository"])
-        if deps["attempt_repository"].get(learner_id, question_id):
+        existing_attempt = deps["attempt_repository"].get(learner_id, question_id)
+        if existing_attempt:
             learner = deps["learner_repository"].get(learner_id)
-            return _response(200, {"completed": learner.baseline_completed, "question": _public_question(current), "progress": {"answered": _answered(deps, learner_id), "total": 5}})
+            return _response(200, {"completed": learner.baseline_completed, "question": _public_question(current), "verdict": _stored_verdict(existing_attempt), "progress": {"answered": _answered(deps, learner_id), "total": 5}})
         if current is None or current.question_id != question_id:
             return _response(400, {"error": "Submit the current baseline question."})
         if not deps["demo_quota"].consume():
             return _response(429, {"error": "Demo execution quota exhausted.", "readOnly": True})
-        learner = baseline.submit_baseline(learner_id, question_id, deps.get("executor", run_submission)(question, code), deps["learner_repository"], deps["question_repository"], deps["attempt_repository"], deps["mastery_repository"])
+        verdict = deps.get("executor", run_submission)(question, code)
+        learner = baseline.submit_baseline(learner_id, question_id, verdict, deps["learner_repository"], deps["question_repository"], deps["attempt_repository"], deps["mastery_repository"])
         next_question = baseline.get_baseline_next(learner_id, deps["learner_repository"], deps["question_repository"], deps["attempt_repository"])
-        return _response(200, {"completed": learner.baseline_completed, "question": _public_question(next_question), "progress": {"answered": _answered(deps, learner_id), "total": TOTAL_BASELINE_QUESTIONS}})
+        return _response(200, {"completed": learner.baseline_completed, "question": _public_question(next_question), "verdict": serialize_verdict(verdict), "progress": {"answered": _answered(deps, learner_id), "total": TOTAL_BASELINE_QUESTIONS}})
     return _adapt(action)
 
 

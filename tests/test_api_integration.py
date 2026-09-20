@@ -62,6 +62,7 @@ def complete_baseline(deps):
         private = deps['question_repository'].get(public['questionId'])
         result = payload(api.baseline_submit(event({'questionId': private.question_id, 'code': private.reference_solution}), None))
         assert result['progress']['answered'] == index + 1
+        assert result['verdict'] == {'passed': True, 'failedCases': []}
         # Duplicate requests resume without another execution charge.
         assert payload(api.baseline_submit(event({'questionId': private.question_id, 'code': private.reference_solution}), None)) == result
     assert result['completed'] and result['question'] is None

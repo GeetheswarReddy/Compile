@@ -76,7 +76,13 @@ function lockedExtensions({ disabled, label, readOnly }) {
  * Tab temporarily restores browser focus navigation. Enter applies
  * Python-aware indentation, and undo/redo use the platform shortcuts.
  */
-export default function CodeEditor({ value, onChange, readOnly = false, disabled = false }) {
+export default function CodeEditor({
+  value,
+  onChange,
+  readOnly = false,
+  disabled = false,
+  readOnlyMessage = 'Editing is disabled after your learner quota is used.',
+}) {
   const editorHostRef = useRef(null);
   const editorViewRef = useRef(null);
   const onChangeRef = useRef(onChange);
@@ -162,7 +168,7 @@ export default function CodeEditor({ value, onChange, readOnly = false, disabled
       <div className="practice-editor__mount" ref={editorHostRef} />
       {locked && (
         <span className="practice-editor__note">
-          {readOnly ? 'Editing is disabled after your learner quota is used.' : 'The editor is unavailable.'}
+          {readOnly ? readOnlyMessage : 'The editor is unavailable.'}
         </span>
       )}
     </section>

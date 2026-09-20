@@ -1,5 +1,6 @@
 import QuestionExamples from '../practice/QuestionExamples';
 import React, { useEffect, useState } from 'react';
+import CodeEditor from '../practice/CodeEditor';
 import { useBaseline } from './useBaseline';
 import './baseline.css';
 
@@ -21,7 +22,7 @@ function constraintsText(constraints) {
 export function BaselineAssessment() {
   const {
     question, answered, total, completed, loading, submitting, error,
-    errorOperation, quotaExhausted, retry, submit,
+    errorOperation, verdict, canAdvance, quotaExhausted, retry, submit, advance,
   } = useBaseline();
   const [code, setCode] = useState('');
 
@@ -69,15 +70,43 @@ export function BaselineAssessment() {
             {constraints && <div className="baseline-constraints"><h2>Constraints</h2><p>{constraints}</p></div>}
           </section>
           <form className="baseline-solution-pane" onSubmit={onSubmit}>
-            <label className="baseline-code-label" htmlFor="baseline-code">Your Python solution</label>
-            <textarea id="baseline-code" className="baseline-code" value={code} onChange={(event) => setCode(event.target.value)} spellCheck="false" required />
+            <CodeEditor
+              value={code}
+              onChange={setCode}
+              readOnly={Boolean(verdict)}
+              disabled={quotaExhausted}
+              readOnlyMessage="This answer has been checked. Continue when you are ready."
+            />
             {error && errorOperation === 'submit' && (
               <div className="baseline-submit-error" role="alert">
                 <p>{quotaExhausted ? 'The demo execution quota is exhausted. Your answer is still here, but it cannot be checked right now.' : error.message}</p>
                 {!quotaExhausted && <p>Your solution and assessment position were kept. Submit again when you’re ready.</p>}
               </div>
             )}
-            <button className="baseline-button" type="submit" disabled={!code.trim() || submitting || quotaExhausted}>{submitting ? 'Checking…' : current === total ? 'Finish assessment' : 'Continue'}</button>
+            {verdict && (
+              <section className={`baseline-verdict ${verdict.passed ? 'is-pass' : 'is-fail'}`} aria-live="polite">
+                <p className="baseline-verdict__label">Test result</p>
+                <h2>{verdict.passed ? 'Passed — your code is correct' : 'Not quite yet — some tests failed'}</h2>
+                <p>{verdict.passed ? 'Your solution produced the expected output.' : 'Review the diagnostics, then continue to the next baseline question.'}</p>
+                {!verdict.passed && verdict.failedCases.length > 0 && (
+                  <ul>
+                    {verdict.failedCases.map((failure, index) => (
+                      <li key={`${index}-${JSON.stringify(failure.input)}`}>
+                        <span>Input: <code>{JSON.stringify(failure.input)}</code></span>
+                        <span>Expected: <code>{JSON.stringify(failure.expected)}</code></span>
+                        <span>Actual: <code>{JSON.stringify(failure.actual)}</code></span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            )}
+            {!verdict && <p className="baseline-check-help">Run &amp; Check evaluates this solution before the assessment advances.</p>}
+            {canAdvance ? (
+              <button className="baseline-button" type="button" onClick={advance}>{current === total ? 'Finish assessment' : 'Next question'}</button>
+            ) : (
+              <button className="baseline-button" type="submit" disabled={!code.trim() || submitting || quotaExhausted}>{submitting ? 'Checking…' : 'Run & Check'}</button>
+            )}
           </form>
         </div>
       </section>

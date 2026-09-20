@@ -28,11 +28,6 @@ function button(window, text) {
     .find((candidate) => candidate.textContent.trim() === text);
 }
 
-function type(window, node, value) {
-  Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set.call(node, value);
-  node.dispatchEvent(new window.Event('input', { bubbles: true }));
-}
-
 function installEditorDomSupport(window) {
   window.requestAnimationFrame = (callback) => window.setTimeout(() => callback(Date.now()), 0);
   window.cancelAnimationFrame = (handle) => window.clearTimeout(handle);
@@ -164,25 +159,28 @@ test('baseline server failure exits pending state, prevents duplicates, and pres
       if (submitCalls === 1) {
         return new Promise((resolve) => { releaseFirst = () => resolve({ status: 503, body: {} }); });
       }
-      return { question: question('baseline-next'), completed: false, progress: { answered: 3, total: 5 } };
+      return { question: question('baseline-next'), verdict: { passed: false, failedCases: [] }, completed: false, progress: { answered: 3, total: 5 } };
     }
     throw new Error(`Unexpected request: ${path}`);
   });
 
   try {
-    await eventually(() => button(app.window, 'Continue'), 'baseline controls');
-    const editor = app.window.document.querySelector('#baseline-code');
+    await eventually(() => editorView(app.window) && button(app.window, 'Run & Check'), 'baseline controls');
+    const editor = editorView(app.window);
     const code = 'def solve(values):\n    return len(values)';
-    type(app.window, editor, code);
-    button(app.window, 'Continue').click();
+    editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: code } });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    button(app.window, 'Run & Check').click();
     button(app.window, 'Checking…')?.click();
     await eventually(() => submitCalls === 1 && typeof releaseFirst === 'function', 'single pending request');
     releaseFirst();
     await eventually(() => app.window.document.body.textContent.includes('service could not complete'), 'server failure');
-    assert.equal(editor.value, code);
+    assert.equal(editor.state.doc.toString(), code);
     assert.ok(app.window.document.body.textContent.includes('baseline-keep'));
-    assert.equal(button(app.window, 'Continue').disabled, false);
-    button(app.window, 'Continue').click();
+    assert.equal(button(app.window, 'Run & Check').disabled, false);
+    button(app.window, 'Run & Check').click();
+    await eventually(() => app.window.document.body.textContent.includes('Not quite yet'), 'baseline verdict renders');
+    button(app.window, 'Next question').click();
     await eventually(() => app.window.document.body.textContent.includes('baseline-next'), 'baseline retry advances');
     assert.deepEqual(submissions, [
       { questionId: 'baseline-keep', code },

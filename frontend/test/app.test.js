@@ -72,7 +72,7 @@ test('mounted App gates direct practice, finishes five baseline questions, check
       assert.equal(body.questionId, `baseline-${answered}`);
       assert.equal(typeof body.code, 'string');
       answered++;
-      return {question: answered < 5 ? q(`baseline-${answered}`) : null, completed: answered === 5, progress: {answered, total: 5}};
+      return {question: answered < 5 ? q(`baseline-${answered}`) : null, verdict: {passed: true, failedCases: []}, completed: answered === 5, progress: {answered, total: 5}};
     }
     if (path.endsWith('/next-question')) return {question: q(generated ? 'generated-1' : 'practice-1', generated ? 'generated' : 'seeded'), learner: {runCheckActions: checks, generationRequests: generated ? 1 : 0}};
     if (path === '/run-check') {
@@ -90,12 +90,14 @@ test('mounted App gates direct practice, finishes five baseline questions, check
   });
   try {
     const {window} = app;
-    await eventually(() => window.location.pathname === '/baseline' && window.document.querySelector('#baseline-code'), 'practice must redirect to baseline');
+    await eventually(() => window.location.pathname === '/baseline' && editorView(window), 'practice must redirect to baseline');
     assert.equal(requests.some((r) => r.path.endsWith('/next-question')), false);
     for (let i = 0; i < 5; i++) {
-      await eventually(() => window.document.body.textContent.includes(`baseline-${i}`), 'next baseline question');
-      button(window, i === 4 ? 'Finish assessment' : 'Continue').click();
+      await eventually(() => window.document.body.textContent.includes(`baseline-${i}`) && !button(window, 'Run & Check')?.disabled, 'next baseline question');
+      button(window, 'Run & Check').click();
       await eventually(() => answered === i + 1, 'baseline submission');
+      await eventually(() => window.document.querySelector('.baseline-verdict')?.textContent.includes('Passed'), 'baseline verdict');
+      button(window, i === 4 ? 'Finish assessment' : 'Next question').click();
     }
     await eventually(() => window.document.body.textContent.includes('Your starting point is ready.'), 'baseline completion screen');
     button(window, 'Compile').click();
