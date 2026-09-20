@@ -1,0 +1,99 @@
+{
+  "browser": "Google Chrome 153.0.8010.52",
+  "captures": [
+    {
+      "name": "home-1440x900.png",
+      "innerWidth": 1440,
+      "innerHeight": 900,
+      "documentScrollWidth": 1440,
+      "bodyScrollWidth": 1440,
+      "documentScrollHeight": 900,
+      "activeElement": "CompileAdaptive Python practicePlacement preparationChoose a topic to practiceBu"
+    },
+    {
+      "name": "home-1280x720.png",
+      "innerWidth": 1280,
+      "innerHeight": 720,
+      "documentScrollWidth": 1280,
+      "bodyScrollWidth": 1280,
+      "documentScrollHeight": 720,
+      "activeElement": "CompileAdaptive Python practicePlacement preparationChoose a topic to practiceBu"
+    },
+    {
+      "name": "home-390x844.png",
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "documentScrollWidth": 390,
+      "bodyScrollWidth": 390,
+      "documentScrollHeight": 1067,
+      "activeElement": "CompileAdaptive Python practicePlacement preparationChoose a topic to practiceBu"
+    },
+    {
+      "name": "baseline-1440x900.png",
+      "innerWidth": 1440,
+      "innerHeight": 900,
+      "documentScrollWidth": 1440,
+      "bodyScrollWidth": 1440,
+      "documentScrollHeight": 900,
+      "activeElement": "CompileAdaptive Python practiceCompile baselineQuestion 1 of 5ArraysDifficulty 3"
+    },
+    {
+      "name": "baseline-1280x720.png",
+      "innerWidth": 1280,
+      "innerHeight": 720,
+      "documentScrollWidth": 1280,
+      "bodyScrollWidth": 1280,
+      "documentScrollHeight": 720,
+      "activeElement": "CompileAdaptive Python practiceCompile baselineQuestion 1 of 5ArraysDifficulty 3"
+    },
+    {
+      "name": "baseline-390x844.png",
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "documentScrollWidth": 390,
+      "bodyScrollWidth": 390,
+      "documentScrollHeight": 1169,
+      "activeElement": "CompileAdaptive Python practiceCompile baselineQuestion 1 of 5ArraysDifficulty 3"
+    },
+    {
+      "name": "practice-1440x900.png",
+      "innerWidth": 1440,
+      "innerHeight": 900,
+      "documentScrollWidth": 1440,
+      "bodyScrollWidth": 1440,
+      "documentScrollHeight": 900,
+      "activeElement": "Your Python solution"
+    },
+    {
+      "name": "practice-1280x720.png",
+      "innerWidth": 1280,
+      "innerHeight": 720,
+      "documentScrollWidth": 1280,
+      "bodyScrollWidth": 1280,
+      "documentScrollHeight": 720,
+      "activeElement": "Your Python solution"
+    },
+    {
+      "name": "practice-390x844.png",
+      "innerWidth": 390,
+      "innerHeight": 844,
+      "documentScrollWidth": 390,
+      "bodyScrollWidth": 390,
+      "documentScrollHeight": 1872,
+      "activeElement": "Your Python solution"
+    }
+  ],
+  "interaction": {
+    "networkFailure": {
+      "message": "We couldn’t reach the service. Check your connection and try again.",
+      "codePreserved": true
+    },
+    "recovery": {
+      "verdict": "Passed",
+      "trace": "Arrays9/20/2026, 2:00:00 PMProvenanceSeededVerification retries0Mastery snapshot4/10Confidence91%",
+      "hint": true,
+      "codePreserved": true
+    },
+    "directPracticeReload": true
+  }
+}
