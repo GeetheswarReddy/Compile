@@ -1,6 +1,7 @@
 import QuestionExamples from '../practice/QuestionExamples';
 import React, { useEffect, useState } from 'react';
 import CodeEditor from '../practice/CodeEditor';
+import { useResizableColumns } from '../layout/useResizableColumns';
 import { useBaseline } from './useBaseline';
 import './baseline.css';
 
@@ -21,10 +22,11 @@ function constraintsText(constraints) {
 
 export function BaselineAssessment() {
   const {
-    question, answered, total, completed, loading, submitting, error,
+    question, answered, total, completed, loading, submitting, error, mastery,
     errorOperation, verdict, canAdvance, quotaExhausted, retry, submit, advance,
   } = useBaseline();
   const [code, setCode] = useState('');
+  const resize = useResizableColumns('compile-baseline-left-pane');
 
   useEffect(() => {
     setCode(question?.starterCode || '');
@@ -45,7 +47,25 @@ export function BaselineAssessment() {
   }
 
   if (completed) {
-    return <main className="baseline-page"><section className="baseline-card baseline-state"><p className="baseline-eyebrow">Baseline complete</p><h1>Your starting point is ready.</h1><p>We’ll use these answers to tune practice to your current level.</p><a className="baseline-button" href="/">Choose a practice topic</a></section></main>;
+    return (
+      <main className="baseline-page">
+        <section className="baseline-card baseline-state baseline-summary" aria-labelledby="baseline-summary-title">
+          <p className="baseline-eyebrow">Baseline complete · {answered}/{total}</p>
+          <h1 id="baseline-summary-title">Your starting levels</h1>
+          <p>These scores select the difficulty of your first practice questions.</p>
+          <div className="baseline-summary__grid" aria-label="Baseline mastery by topic">
+            {mastery.length > 0 ? mastery.map((item) => (
+              <article key={item.topic}>
+                <span>{item.topic}</span>
+                <strong>{item.score}<small>/10</small></strong>
+                <p>Confidence {Math.round(Number(item.confidence) * 100)}%</p>
+              </article>
+            )) : <p className="baseline-summary__empty">Your baseline is complete. Topic scores will appear after your next refresh.</p>}
+          </div>
+          <a className="baseline-button" href="/">Choose a practice topic</a>
+        </section>
+      </main>
+    );
   }
 
   if (!question) return <main className="baseline-page"><p>No assessment question is available. Please retry.</p><button onClick={retry}>Retry</button></main>;
@@ -60,7 +80,7 @@ export function BaselineAssessment() {
         <div className="baseline-progress" aria-label={`Question ${current} of ${total}`}>
           {Array.from({ length: total }, (_, index) => <span aria-hidden="true" className={`baseline-dot ${index < answered ? 'is-done' : ''} ${index === answered ? 'is-current' : ''}`} key={index} />)}
         </div>
-        <div className="baseline-workspace">
+        <div className="baseline-workspace" ref={resize.containerRef} style={resize.containerStyle}>
           <section className="baseline-question-pane" aria-labelledby="baseline-title">
             <p className="baseline-topic">{labelForTopic(question.topic)}</p>
             <div className="baseline-meta"><span>Difficulty {question.difficulty}/10</span></div>
@@ -69,6 +89,7 @@ export function BaselineAssessment() {
             {question.functionSignature && <pre className="baseline-signature"><code>{question.functionSignature}</code></pre>}
             {constraints && <div className="baseline-constraints"><h2>Constraints</h2><p>{constraints}</p></div>}
           </section>
+          <div className="workspace-resizer" {...resize.separatorProps}><span aria-hidden="true" /></div>
           <form className="baseline-solution-pane" onSubmit={onSubmit}>
             <CodeEditor
               value={code}

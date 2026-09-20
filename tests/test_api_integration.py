@@ -66,6 +66,10 @@ def complete_baseline(deps):
         # Duplicate requests resume without another execution charge.
         assert payload(api.baseline_submit(event({'questionId': private.question_id, 'code': private.reference_solution}), None)) == result
     assert result['completed'] and result['question'] is None
+    assert {item['topic'] for item in result['mastery']} == {'Arrays', 'Strings', 'Hash Maps/Two Pointers'}
+    summary = payload(api.baseline_next(event(), None))
+    assert summary['completed'] and summary['progress'] == {'answered': 5, 'total': 5}
+    assert {item['topic'] for item in summary['mastery']} == {'Arrays', 'Strings', 'Hash Maps/Two Pointers'}
 
 
 def test_baseline_resume_practice_run_check_and_trace(deps):

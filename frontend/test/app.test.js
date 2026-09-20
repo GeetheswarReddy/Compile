@@ -99,7 +99,7 @@ test('mounted App gates direct practice, finishes five baseline questions, check
       await eventually(() => window.document.querySelector('.baseline-verdict')?.textContent.includes('Passed'), 'baseline verdict');
       button(window, i === 4 ? 'Finish assessment' : 'Next question').click();
     }
-    await eventually(() => window.document.body.textContent.includes('Your starting point is ready.'), 'baseline completion screen');
+    await eventually(() => window.document.body.textContent.includes('Your starting levels'), 'baseline completion screen');
     button(window, 'Compile').click();
     await eventually(() => button(window, 'Practice topic'), 'home navigation');
     button(window, 'Practice topic').click();

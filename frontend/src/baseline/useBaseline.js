@@ -27,6 +27,7 @@ export function useBaseline() {
   const [errorOperation, setErrorOperation] = useState(null);
   const [verdict, setVerdict] = useState(null);
   const [pendingAdvance, setPendingAdvance] = useState(null);
+  const [mastery, setMastery] = useState([]);
   const abortRef = useRef(null);
   const submitAbortRef = useRef(null);
   const loadSequenceRef = useRef(0);
@@ -53,6 +54,7 @@ export function useBaseline() {
       setAnswered(Math.min(progress.answered, progress.total));
       setTotal(progress.total);
       setCompleted(Boolean(payload?.completed));
+      setMastery(Array.isArray(payload?.mastery) ? payload.mastery : []);
       return payload;
     } catch (requestError) {
       if (!isAbortError(requestError) && sequence === loadSequenceRef.current && mountedRef.current) {
@@ -121,11 +123,12 @@ export function useBaseline() {
     setAnswered(Math.min(progress.answered, progress.total));
     setTotal(progress.total);
     setCompleted(Boolean(pendingAdvance.completed));
+    setMastery(Array.isArray(pendingAdvance.mastery) ? pendingAdvance.mastery : mastery);
     setVerdict(null);
     setPendingAdvance(null);
     setError(null);
     setErrorOperation(null);
-  }, [pendingAdvance]);
+  }, [mastery, pendingAdvance]);
 
   return {
     question,
@@ -136,6 +139,7 @@ export function useBaseline() {
     submitting,
     error,
     errorOperation,
+    mastery,
     verdict,
     canAdvance: Boolean(pendingAdvance),
     quotaExhausted: isQuotaError(error),

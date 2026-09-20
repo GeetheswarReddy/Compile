@@ -117,7 +117,13 @@ test('practice workspace keeps question, trace, editor, actions, and bounded res
     const questionPane = workspace.querySelector('.practice-question-pane');
     const solutionPane = workspace.querySelector('.practice-solution-pane');
     const traceSlot = workspace.querySelector('.practice-trace-slot');
+    const separator = workspace.querySelector('[role="separator"]');
     assert.ok(questionPane && solutionPane);
+    assert.ok(separator, 'desktop workspace exposes a pane resizer');
+    const initialSize = Number(separator.getAttribute('aria-valuenow'));
+    separator.dispatchEvent(new app.window.KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'ArrowRight' }));
+    await eventually(() => Number(separator.getAttribute('aria-valuenow')) === initialSize + 5, 'keyboard resizes practice panes');
+    assert.equal(workspace.style.getPropertyValue('--workspace-left'), `${initialSize + 5}%`);
     assert.ok(questionPane.compareDocumentPosition(solutionPane) & Node.DOCUMENT_POSITION_FOLLOWING);
     assert.ok(questionPane.textContent.includes('Generated for your level'));
     assert.ok(questionPane.textContent.includes('Input: [[7,8]]'));
@@ -178,7 +184,9 @@ test('baseline uses the same question-left and solution-right landmark order', a
     const workspace = document.querySelector('.baseline-workspace');
     const questionPane = workspace.querySelector('.baseline-question-pane');
     const solutionPane = workspace.querySelector('.baseline-solution-pane');
+    const separator = workspace.querySelector('[role="separator"]');
     assert.ok(questionPane && solutionPane);
+    assert.ok(separator, 'baseline workspace exposes a pane resizer');
     assert.ok(questionPane.compareDocumentPosition(solutionPane) & Node.DOCUMENT_POSITION_FOLLOWING);
     assert.ok(questionPane.textContent.includes(question.prompt));
     assert.ok(questionPane.textContent.includes('values contain integers'));
@@ -187,6 +195,36 @@ test('baseline uses the same question-left and solution-right landmark order', a
     assert.ok(solutionPane.querySelector('.cm-lineNumbers'));
     assert.equal(solutionPane.querySelector('.practice-editor__language')?.textContent, 'Python');
     assert.equal(solutionPane.querySelector('button[type="submit"]')?.textContent, 'Run & Check');
+    assert.deepEqual(app.errors, []);
+  } finally {
+    app.close();
+  }
+});
+
+test('completed baseline status shows five-question progress and topic mastery', async () => {
+  const app = mount('/baseline', async (path) => {
+    if (path === '/learner/init') return { learner: { baselineCompleted: true } };
+    if (path === '/baseline/next') return {
+      question: null,
+      completed: true,
+      progress: { answered: 5, total: 5 },
+      mastery: [
+        { topic: 'Arrays', score: 6, confidence: 1 },
+        { topic: 'Strings', score: 4, confidence: 0.9 },
+        { topic: 'Hash Maps/Two Pointers', score: 5, confidence: 0.8 },
+      ],
+    };
+    throw new Error(`Unexpected request: ${path}`);
+  });
+
+  try {
+    await eventually(() => app.window.document.querySelector('.baseline-summary'), 'baseline summary renders');
+    const summary = app.window.document.querySelector('.baseline-summary');
+    assert.ok(summary.textContent.includes('Baseline complete · 5/5'));
+    assert.ok(summary.textContent.includes('Arrays'));
+    assert.ok(summary.textContent.includes('6/10'));
+    assert.ok(summary.textContent.includes('Strings'));
+    assert.ok(summary.textContent.includes('Hash Maps/Two Pointers'));
     assert.deepEqual(app.errors, []);
   } finally {
     app.close();

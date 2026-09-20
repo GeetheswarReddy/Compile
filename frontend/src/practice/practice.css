@@ -54,7 +54,7 @@
   min-width: 0;
   min-height: 0;
   flex: 1;
-  grid-template-columns: minmax(22rem, 45fr) minmax(28rem, 55fr);
+  grid-template-columns: minmax(22rem, var(--workspace-left, 45%)) 0.65rem minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
   gap: var(--space-3);
 }
@@ -241,7 +241,7 @@
 
 .practice-solution-pane {
   display: flex;
-  grid-column: 2;
+  grid-column: 3;
   grid-row: 1 / -1;
   flex-direction: column;
   overflow: hidden;

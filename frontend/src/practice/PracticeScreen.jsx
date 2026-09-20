@@ -1,6 +1,7 @@
 import QuestionExamples from '../practice/QuestionExamples';
 import React, { useEffect } from 'react';
 import CodeEditor from './CodeEditor';
+import { useResizableColumns } from '../layout/useResizableColumns';
 import { usePractice } from './usePractice';
 import './practice.css';
 
@@ -28,6 +29,7 @@ export default function PracticeScreen({
   history = null,
 }) {
   const practice = usePractice(topicId);
+  const resize = useResizableColumns('compile-practice-left-pane');
   const { question, verdict, readOnly, error, loading, submitting, generating } = practice;
   const techniqueTag = question?.techniqueTag || question?.technique;
   const constraints = constraintsText(question?.constraints);
@@ -57,7 +59,7 @@ export default function PracticeScreen({
           <p className="practice-loading" role="status">Finding your next question…</p>
         </section>
       ) : question ? (
-        <section className={`practice-workspace ${trace ? 'has-trace' : ''}`} aria-label="Practice workspace">
+        <section className={`practice-workspace ${trace ? 'has-trace' : ''}`} aria-label="Practice workspace" ref={resize.containerRef} style={resize.containerStyle}>
           <section className="practice-pane practice-question-pane" aria-labelledby="practice-question-title">
             <div className="practice-question">
               <div className="practice-question__meta">
@@ -86,6 +88,8 @@ export default function PracticeScreen({
               </div>
             )}
           </section>
+
+          <div className="workspace-resizer" {...resize.separatorProps}><span aria-hidden="true" /></div>
 
           {trace && <div className="practice-trace-slot">{trace}</div>}
 

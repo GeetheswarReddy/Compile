@@ -108,6 +108,54 @@ a {
   background: var(--color-accent);
 }
 
+.workspace-resizer {
+  position: relative;
+  z-index: 2;
+  grid-column: 2;
+  grid-row: 1 / -1;
+  min-width: 0.65rem;
+  border-radius: 999px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.workspace-resizer::before {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: transparent;
+  content: "";
+  transition: background-color 120ms ease;
+}
+
+.workspace-resizer span {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0.2rem;
+  height: 3.25rem;
+  border-radius: 999px;
+  background: var(--color-border-strong);
+  transform: translate(-50%, -50%);
+  transition: background-color 120ms ease, height 120ms ease;
+}
+
+.workspace-resizer:hover::before,
+.workspace-resizer:focus-visible::before {
+  background: rgb(242 184 75 / 8%);
+}
+
+.workspace-resizer:hover span,
+.workspace-resizer:focus-visible span {
+  height: 4.5rem;
+  background: var(--color-accent);
+}
+
+.workspace-resizer:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 1px;
+}
+
 .app-shell {
   min-height: 100vh;
   color: var(--color-text);
@@ -477,6 +525,12 @@ a {
 
   .topic-card {
     min-height: 11.5rem;
+  }
+}
+
+@media (max-width: 899px) {
+  .workspace-resizer {
+    display: none;
   }
 }
 
