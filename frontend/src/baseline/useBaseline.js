@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiClient } from '../api/client';
+import { isAbortError, isQuotaError } from '../api/contracts';
 import { getLearnerId } from '../identity/learnerId';
 
 const DEFAULT_TOTAL = 5;
@@ -23,42 +24,26 @@ export function useBaseline() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
+  const [errorOperation, setErrorOperation] = useState(null);
   const abortRef = useRef(null);
+  const submitAbortRef = useRef(null);
+  const loadSequenceRef = useRef(0);
+  const submitLockRef = useRef(false);
+  const mountedRef = useRef(true);
 
   const load = useCallback(async () => {
     abortRef.current?.abort();
     const controller = new AbortController();
+    const sequence = ++loadSequenceRef.current;
     abortRef.current = controller;
     setLoading(true);
     setError(null);
+    setErrorOperation(null);
 
     try {
       getLearnerId();
       const payload = await apiClient.getBaselineNext({ signal: controller.signal });
-      const progress = progressFrom(payload);
-      setQuestion(payload?.question || null);
-      setAnswered(Math.min(progress.answered, progress.total));
-      setTotal(progress.total);
-      setCompleted(Boolean(payload?.completed));
-    } catch (requestError) {
-      if (requestError.name !== 'AbortError') setError(requestError);
-    } finally {
-      if (!controller.signal.aborted) setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    load();
-    return () => abortRef.current?.abort();
-  }, [load]);
-
-  const submit = useCallback(async (code) => {
-    if (!question || submitting) return;
-    setSubmitting(true);
-    setError(null);
-
-    try {
-      const payload = await apiClient.submitBaseline({ questionId: question.questionId, code });
+      if (controller.signal.aborted || sequence !== loadSequenceRef.current || !mountedRef.current) return null;
       const progress = progressFrom(payload);
       setQuestion(payload?.question || null);
       setAnswered(Math.min(progress.answered, progress.total));
@@ -66,12 +51,71 @@ export function useBaseline() {
       setCompleted(Boolean(payload?.completed));
       return payload;
     } catch (requestError) {
-      setError(requestError);
-      throw requestError;
+      if (!isAbortError(requestError) && sequence === loadSequenceRef.current && mountedRef.current) {
+        setError(requestError);
+        setErrorOperation('load');
+      }
+      return null;
     } finally {
-      setSubmitting(false);
+      if (!controller.signal.aborted && sequence === loadSequenceRef.current && mountedRef.current) setLoading(false);
     }
-  }, [question, submitting]);
+  }, []);
 
-  return { question, answered, total, completed, loading, submitting, error, retry: load, submit };
+  useEffect(() => {
+    mountedRef.current = true;
+    load();
+    return () => {
+      mountedRef.current = false;
+      abortRef.current?.abort();
+      submitAbortRef.current?.abort();
+    };
+  }, [load]);
+
+  const submit = useCallback(async (code) => {
+    if (!question || submitLockRef.current) return null;
+    submitLockRef.current = true;
+    const controller = new AbortController();
+    submitAbortRef.current = controller;
+    setSubmitting(true);
+    setError(null);
+    setErrorOperation(null);
+
+    try {
+      const payload = await apiClient.submitBaseline(
+        { questionId: question.questionId, code },
+        { signal: controller.signal },
+      );
+      if (controller.signal.aborted || !mountedRef.current) return null;
+      const progress = progressFrom(payload);
+      setQuestion(payload?.question || null);
+      setAnswered(Math.min(progress.answered, progress.total));
+      setTotal(progress.total);
+      setCompleted(Boolean(payload?.completed));
+      return payload;
+    } catch (requestError) {
+      if (!isAbortError(requestError) && mountedRef.current) {
+        setError(requestError);
+        setErrorOperation('submit');
+      }
+      return null;
+    } finally {
+      submitLockRef.current = false;
+      if (submitAbortRef.current === controller) submitAbortRef.current = null;
+      if (mountedRef.current) setSubmitting(false);
+    }
+  }, [question]);
+
+  return {
+    question,
+    answered,
+    total,
+    completed,
+    loading,
+    submitting,
+    error,
+    errorOperation,
+    quotaExhausted: isQuotaError(error),
+    retry: load,
+    submit,
+  };
 }

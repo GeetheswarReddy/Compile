@@ -38,4 +38,16 @@ function normalizeVerdict(payload) {
   };
 }
 
-export { unwrapQuestion, readOnlyFrom, boundedFailures, normalizeVerdict };
+function isAbortError(error) {
+  return error?.name === 'AbortError';
+}
+
+function isQuotaError(error) {
+  return error?.kind === 'quota' || error?.status === 429;
+}
+
+function errorMessage(error, fallback) {
+  return typeof error?.message === 'string' && error.message.trim() ? error.message : fallback;
+}
+
+export { unwrapQuestion, readOnlyFrom, boundedFailures, normalizeVerdict, isAbortError, isQuotaError, errorMessage };

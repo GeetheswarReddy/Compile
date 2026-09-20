@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
+import { EditorView } from '@codemirror/view';
 import { JSDOM, VirtualConsole } from 'jsdom';
 
 const bundle = readdirSync(new URL('../dist/assets/', import.meta.url)).find((name) => name.endsWith('.js'));
@@ -19,9 +20,22 @@ async function eventually(check, message) {
 function button(window, text) {
   return [...window.document.querySelectorAll('button')].find((b) => b.textContent.trim() === text);
 }
-function type(window, node, value) {
-  Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set.call(node, value);
-  node.dispatchEvent(new window.Event('input', {bubbles: true}));
+function installEditorDomSupport(window) {
+  window.requestAnimationFrame = (callback) => window.setTimeout(() => callback(Date.now()), 0);
+  window.cancelAnimationFrame = (handle) => window.clearTimeout(handle);
+  window.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+  window.Range.prototype.getClientRects = () => [];
+  window.Range.prototype.getBoundingClientRect = () => ({
+    bottom: 0, height: 0, left: 0, right: 0, top: 0, width: 0,
+  });
+}
+function editorView(window) {
+  const editor = window.document.querySelector('.cm-editor');
+  return editor ? EditorView.findFromDOM(editor) : null;
 }
 function mount(path, handler) {
   const errors = [];
@@ -31,6 +45,7 @@ function mount(path, handler) {
     url: `https://compile.test${path}`, runScripts: 'outside-only', virtualConsole: console,
   });
   const { window } = dom;
+  installEditorDomSupport(window);
   const originalTimeout = window.setTimeout.bind(window);
   window.setTimeout = (fn, delay, ...args) => originalTimeout(fn, delay === 8000 ? 10 : delay, ...args);
   window.fetch = async (url, options = {}) => {
@@ -88,8 +103,16 @@ test('mounted App gates direct practice, finishes five baseline questions, check
     button(window, 'Practice topic').click();
     await eventually(() => button(window, 'Run & Check'), 'practice renders real editor');
     assert.equal(window.document.body.textContent.includes('Technique: indexing'), false);
-    const editor = window.document.querySelector('textarea');
-    type(window, editor, 'def solve(values):\n    return values[0]');
+    const editor = editorView(window);
+    assert.ok(editor, 'practice renders a CodeMirror EditorView');
+    editor.dispatch({
+      changes: {
+        from: 0,
+        to: editor.state.doc.length,
+        insert: 'def solve(values):\n    return values[0]',
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
     button(window, 'Run & Check').click();
     await eventually(() => window.document.querySelector('.practice-verdict')?.textContent.includes('Passed'), 'passing verdict renders');
     button(window, 'Reveal Nudge').click();
@@ -97,7 +120,7 @@ test('mounted App gates direct practice, finishes five baseline questions, check
     assert.equal(requests.find((r) => r.path === '/hint').body.questionId, 'practice-1');
     button(window, 'Generate another').click();
     await eventually(() => window.document.body.textContent.includes('generated-1'), 'async acknowledgement resolves to a real question');
-    assert.equal(window.document.querySelector('textarea').value, q('generated-1').starterCode);
+    assert.equal(editorView(window).state.doc.toString(), q('generated-1').starterCode);
     assert.deepEqual(app.errors, []);
   } finally { app.close(); }
 });
@@ -111,7 +134,7 @@ test('completed topics render a completion state without an editor or execution 
   });
   try {
     await eventually(() => app.window.document.body.textContent.includes('completed the available questions'), 'completed topic message');
-    assert.equal(app.window.document.querySelector('textarea'), null);
+    assert.equal(app.window.document.querySelector('.cm-editor'), null);
     assert.equal(button(app.window, 'Run & Check'), undefined);
     assert.deepEqual(app.errors, []);
   } finally { app.close(); }

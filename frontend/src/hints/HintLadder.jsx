@@ -58,6 +58,7 @@ export default function HintLadder({ questionId, onHint, disabled = false, class
           <li className={index < currentLevel ? 'is-open' : ''} key={name}>
             <span className="hint-ladder__step-number">{index + 1}</span>
             <span>{name}</span>
+            <span className="hint-ladder__step-state">{index < currentLevel ? 'Revealed' : 'Locked'}</span>
           </li>
         ))}
       </ol>

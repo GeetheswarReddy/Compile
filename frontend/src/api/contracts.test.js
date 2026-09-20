@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { unwrapQuestion, normalizeVerdict, readOnlyFrom } from './contracts.js';
+import { errorMessage, isAbortError, isQuotaError, unwrapQuestion, normalizeVerdict, readOnlyFrom } from './contracts.js';
 
 test('completion and async generation responses never become editor questions', () => {
   assert.equal(unwrapQuestion({ question: null, completed: true }), null);
@@ -21,4 +21,14 @@ test('server quota and persisted learner counts disable execution controls', () 
   assert.equal(readOnlyFrom({ learner: {runCheckActions: 5} }), true);
   assert.equal(readOnlyFrom({ learner: {generationRequests: 2} }), true);
   assert.equal(readOnlyFrom({ readOnly: true }), true);
+});
+
+test('request failures distinguish cancellation, quota, and safe fallback messages', () => {
+  assert.equal(isAbortError({ name: 'AbortError' }), true);
+  assert.equal(isAbortError({ kind: 'connectivity' }), false);
+  assert.equal(isQuotaError({ kind: 'quota' }), true);
+  assert.equal(isQuotaError({ status: 429 }), true);
+  assert.equal(isQuotaError({ status: 503 }), false);
+  assert.equal(errorMessage({ message: 'Please retry.' }, 'Fallback'), 'Please retry.');
+  assert.equal(errorMessage({}, 'Fallback'), 'Fallback');
 });

@@ -19,7 +19,10 @@ function constraintsText(constraints) {
 }
 
 export function BaselineAssessment() {
-  const { question, answered, total, completed, loading, submitting, error, retry, submit } = useBaseline();
+  const {
+    question, answered, total, completed, loading, submitting, error,
+    errorOperation, quotaExhausted, retry, submit,
+  } = useBaseline();
   const [code, setCode] = useState('');
 
   useEffect(() => {
@@ -29,18 +32,14 @@ export function BaselineAssessment() {
   const onSubmit = async (event) => {
     event.preventDefault();
     if (!code.trim() || submitting) return;
-    try {
-      await submit(code);
-    } catch {
-      // Keep the learner's code available to retry; the hook exposes the error state.
-    }
+    await submit(code);
   };
 
   if (loading) {
     return <main className="baseline-page"><section className="baseline-card baseline-state" aria-busy="true"><p className="baseline-eyebrow">Compile baseline</p><h1>Loading your assessment…</h1></section></main>;
   }
 
-  if (error) {
+  if (error && errorOperation === 'load') {
     return <main className="baseline-page"><section className="baseline-card baseline-state" role="alert"><p className="baseline-eyebrow">Compile baseline</p><h1>We couldn’t load your assessment.</h1><p>{error.message}</p><button className="baseline-button" onClick={retry}>Try again</button></section></main>;
   }
 
@@ -60,17 +59,27 @@ export function BaselineAssessment() {
         <div className="baseline-progress" aria-label={`Question ${current} of ${total}`}>
           {Array.from({ length: total }, (_, index) => <span aria-hidden="true" className={`baseline-dot ${index < answered ? 'is-done' : ''} ${index === answered ? 'is-current' : ''}`} key={index} />)}
         </div>
-        <p className="baseline-topic">{labelForTopic(question.topic)}</p>
-        <div className="baseline-meta"><span>Difficulty {question.difficulty}/10</span></div>
-        <h1 id="baseline-title">{question.prompt}</h1>
-        <QuestionExamples examples={question.examples} />
-        {question.functionSignature && <pre className="baseline-signature"><code>{question.functionSignature}</code></pre>}
-        {constraints && <div className="baseline-constraints"><h2>Constraints</h2><p>{constraints}</p></div>}
-        <form onSubmit={onSubmit}>
-          <label className="baseline-code-label" htmlFor="baseline-code">Your Python solution</label>
-          <textarea id="baseline-code" className="baseline-code" value={code} onChange={(event) => setCode(event.target.value)} spellCheck="false" required />
-          <button className="baseline-button" type="submit" disabled={!code.trim() || submitting}>{submitting ? 'Saving…' : current === total ? 'Finish assessment' : 'Continue'}</button>
-        </form>
+        <div className="baseline-workspace">
+          <section className="baseline-question-pane" aria-labelledby="baseline-title">
+            <p className="baseline-topic">{labelForTopic(question.topic)}</p>
+            <div className="baseline-meta"><span>Difficulty {question.difficulty}/10</span></div>
+            <h1 id="baseline-title">{question.prompt}</h1>
+            <QuestionExamples examples={question.examples} />
+            {question.functionSignature && <pre className="baseline-signature"><code>{question.functionSignature}</code></pre>}
+            {constraints && <div className="baseline-constraints"><h2>Constraints</h2><p>{constraints}</p></div>}
+          </section>
+          <form className="baseline-solution-pane" onSubmit={onSubmit}>
+            <label className="baseline-code-label" htmlFor="baseline-code">Your Python solution</label>
+            <textarea id="baseline-code" className="baseline-code" value={code} onChange={(event) => setCode(event.target.value)} spellCheck="false" required />
+            {error && errorOperation === 'submit' && (
+              <div className="baseline-submit-error" role="alert">
+                <p>{quotaExhausted ? 'The demo execution quota is exhausted. Your answer is still here, but it cannot be checked right now.' : error.message}</p>
+                {!quotaExhausted && <p>Your solution and assessment position were kept. Submit again when you’re ready.</p>}
+              </div>
+            )}
+            <button className="baseline-button" type="submit" disabled={!code.trim() || submitting || quotaExhausted}>{submitting ? 'Checking…' : current === total ? 'Finish assessment' : 'Continue'}</button>
+          </form>
+        </div>
       </section>
     </main>
   );

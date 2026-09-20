@@ -8,7 +8,8 @@ function formatTimestamp(timestamp) {
 }
 
 function formatConfidence(confidence) {
-  return `${Math.round(Number(confidence) * 100)}%`;
+  const value = Number(confidence);
+  return Number.isFinite(value) ? `${Math.round(value * 100)}%` : '—';
 }
 
 export function DemoTrace({ enabled }) {
@@ -18,17 +19,17 @@ export function DemoTrace({ enabled }) {
   if (!isEnabled) return null;
 
   return (
-    <aside className="demo-trace" aria-label="Demo activity">
+    <aside className="demo-trace" aria-label="Demo trace">
       <div className="demo-trace__heading">
         <div>
           <p className="demo-trace__eyebrow">Demo mode</p>
-          <h2>Demo activity</h2>
+          <h2>Demo Trace</h2>
         </div>
         <span className="demo-trace__badge">Preview</span>
       </div>
 
-      {loading && <p className="demo-trace__status">Loading demo details…</p>}
-      {error && <p className="demo-trace__status demo-trace__status--error">Could not load demo details.</p>}
+      {loading && <p className="demo-trace__status" role="status">Loading demo details…</p>}
+      {error && <p className="demo-trace__status demo-trace__status--error" role="alert">Could not load demo details.</p>}
       {!loading && !error && entries.length === 0 && (
         <p className="demo-trace__status">No demo details yet.</p>
       )}
