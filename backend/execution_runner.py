@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 import pickle
 import signal
@@ -22,6 +23,7 @@ from backend.contracts import FailedCase, Question, SubmissionVerdict
 EXECUTION_TIMEOUT_SECONDS = 5.0
 ADDRESS_SPACE_BYTES = 128 * 1024 * 1024
 _RESULT_FD = 198
+logger = logging.getLogger(__name__)
 
 
 _CHILD_PROGRAM = r'''
@@ -33,6 +35,7 @@ import io
 import json
 import os
 import pickle
+import resource
 import sys
 
 tests = pickle.loads(base64.b64decode(__TESTS__))
@@ -42,15 +45,16 @@ starter = pickle.loads(base64.b64decode(__STARTER__))
 # Keep ordinary submissions from reaching network clients.  The subprocess is
 # also started without inherited environment variables or descriptors.
 blocked = {
-    "asyncio", "ftplib", "http", "http.client", "httpx", "requests",
-    "socket", "ssl", "telnetlib", "urllib", "urllib.request",
+    "_socket", "asyncio", "ctypes", "ftplib", "http", "http.client",
+    "httpx", "importlib", "multiprocessing", "os", "pathlib", "requests",
+    "socket", "ssl", "subprocess", "sys", "telnetlib", "urllib",
+    "urllib.request",
 }
 real_import = builtins.__import__
 def safe_import(name, globals=None, locals=None, fromlist=(), level=0):
     if name.split(".", 1)[0] in blocked:
         raise ImportError("network access is disabled")
     return real_import(name, globals, locals, fromlist, level)
-builtins.__import__ = safe_import
 
 def safe_value(value):
     if value is None or isinstance(value, (bool, int, float, str)):
@@ -74,8 +78,40 @@ def emit(payload):
 import bisect, collections, functools, heapq, itertools, math, operator
 import random, re, statistics, string, typing
 __SANDBOX__
-restrict_child()
+kernel_filter_enforced = True
+try:
+    # Start the Lambda-provided interpreter before applying RLIMIT_AS. The
+    # runtime's dynamic loader and standard-library imports need more virtual
+    # address space than learner code is allowed to allocate afterwards.
+    restrict_child()
+except RuntimeError:
+    # Lambda's own sandbox can reject installing a second seccomp filter. The
+    # private executor still has no service permissions, credentials, network
+    # route, DNS, inherited descriptors or process environment. Tighten the
+    # Python boundary as defense in depth and retain the resource limits.
+    if not __ALLOW_KERNEL_FILTER_FALLBACK__:
+        emit({"infrastructureError": "sandbox initialization failed", "errorType": "RuntimeError"})
+        sys.exit(0)
+    kernel_filter_enforced = False
+    def denied_open(*args, **kwargs):
+        raise PermissionError("filesystem access is disabled")
+    builtins.open = denied_open
+except BaseException as error:
+    emit({"infrastructureError": "sandbox initialization failed", "errorType": type(error).__name__})
+    sys.exit(0)
 
+try:
+    if sys.platform == "linux":
+        resource.setrlimit(resource.RLIMIT_AS, (__ADDRESS_SPACE_BYTES__, __ADDRESS_SPACE_BYTES__))
+    resource.setrlimit(resource.RLIMIT_CPU, (5, 5))
+    resource.setrlimit(resource.RLIMIT_FSIZE, (0, 0))
+    if sys.platform == "linux":
+        resource.setrlimit(resource.RLIMIT_NPROC, (0, 0))
+except BaseException as error:
+    emit({"infrastructureError": "sandbox initialization failed", "errorType": type(error).__name__})
+    sys.exit(0)
+
+builtins.__import__ = safe_import
 namespace = {"__name__": "__submission__"}
 try:
     # starter_code supplies the exercise's normal function scaffold.  Running
@@ -113,27 +149,10 @@ try:
             })
             if len(failures) == 2:
                 break
-    emit({"passed": not failures, "failed": failures})
+    emit({"passed": not failures, "failed": failures, "kernelFilter": kernel_filter_enforced})
 except BaseException:
     emit({"passed": False, "failed": []})
 '''
-
-
-def _limit_address_space() -> None:
-    """Apply the child-only memory limit on Unix-like runtimes."""
-
-    try:
-        import resource
-
-        resource.setrlimit(resource.RLIMIT_AS, (ADDRESS_SPACE_BYTES, ADDRESS_SPACE_BYTES))
-        resource.setrlimit(resource.RLIMIT_CPU, (5, 5))
-        resource.setrlimit(resource.RLIMIT_FSIZE, (0, 0))
-        if sys.platform == "linux":
-            resource.setrlimit(resource.RLIMIT_NPROC, (0, 0))
-    except (ImportError, OSError, ValueError):
-        # Windows has no resource module.  The subprocess boundary and timeout
-        # still apply there; Lambda and the deployment target are Linux.
-        pass
 
 
 def _child_script(question: Question, code: str) -> str:
@@ -145,6 +164,8 @@ def _child_script(question: Question, code: str) -> str:
         )).decode()),
         "__CODE__": repr(base64.b64encode(pickle.dumps(code)).decode()),
         "__STARTER__": repr(base64.b64encode(pickle.dumps(question.starter_code)).decode()),
+        "__ADDRESS_SPACE_BYTES__": str(ADDRESS_SPACE_BYTES),
+        "__ALLOW_KERNEL_FILTER_FALLBACK__": repr(bool(os.environ.get("AWS_LAMBDA_FUNCTION_NAME"))),
     }
     # The child decodes the trusted, parent-created values before execution.
     program = _CHILD_PROGRAM
@@ -158,6 +179,28 @@ def _kill_process(process: subprocess.Popen[bytes]) -> None:
         os.killpg(process.pid, signal.SIGKILL)
     except (ProcessLookupError, OSError):
         process.kill()
+
+
+def _local_preexec_limits() -> None:
+    """Apply the address cap before exec on platforms that reject lowering it later."""
+
+    try:
+        import resource
+        resource.setrlimit(resource.RLIMIT_AS, (ADDRESS_SPACE_BYTES, ADDRESS_SPACE_BYTES))
+    except (ImportError, OSError, ValueError):
+        pass
+
+
+def _child_environment() -> dict[str, str]:
+    """Pass only the Lambda runtime's dynamic-loader path to the child.
+
+    The AWS Python executable needs ``LD_LIBRARY_PATH`` after ``execve``.
+    Forwarding the complete Lambda environment would also expose temporary AWS
+    credentials to learner code, so every other variable remains absent.
+    """
+
+    loader_path = os.environ.get("LD_LIBRARY_PATH")
+    return {"LD_LIBRARY_PATH": loader_path} if loader_path else {}
 
 
 def run_submission(question: Question, code: str) -> SubmissionVerdict:
@@ -182,8 +225,8 @@ def run_submission(question: Question, code: str) -> SubmissionVerdict:
             pass_fds=(_RESULT_FD,),
             close_fds=True,
             start_new_session=True,
-            preexec_fn=_limit_address_space if os.name != "nt" else None,
-            env={},
+            preexec_fn=_local_preexec_limits if os.name != "nt" and sys.platform != "linux" else None,
+            env=_child_environment(),
         )
         # The parent must not retain a writer, otherwise the reader below can
         # wait forever for EOF after the child exits.
@@ -199,6 +242,14 @@ def run_submission(question: Question, code: str) -> SubmissionVerdict:
             return SubmissionVerdict(False)
         with os.fdopen(read_fd, "rb") as result_pipe:
             payload = json.loads(result_pipe.read(1_000_000).decode("utf-8"))
+        if payload.get("infrastructureError"):
+            logger.error(
+                "execution sandbox initialization failed (error=%s)",
+                payload.get("errorType", "unknown"),
+            )
+            raise RuntimeError("execution sandbox unavailable")
+        if payload.get("kernelFilter") is False:
+            logger.warning("Lambda rejected the additional child kernel filter; using the isolated executor boundary")
         if payload.get("passed") is True:
             return SubmissionVerdict(True)
         failures = tuple(
@@ -206,8 +257,13 @@ def run_submission(question: Question, code: str) -> SubmissionVerdict:
             for item in payload.get("failed", [])[:2]
         )
         return SubmissionVerdict(False, failures)
-    except (OSError, ValueError, UnicodeError, json.JSONDecodeError):
-        return SubmissionVerdict(False)
+    except (OSError, ValueError, UnicodeError, json.JSONDecodeError) as exc:
+        logger.warning(
+            "sandbox child failed before returning a verdict (returncode=%s, error=%s)",
+            process.returncode if process is not None else None,
+            type(exc).__name__,
+        )
+        raise RuntimeError("execution sandbox unavailable") from exc
     finally:
         if write_fd != -1:
             os.close(write_fd)

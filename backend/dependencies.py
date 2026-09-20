@@ -21,7 +21,8 @@ def compose_dependencies(*, dynamodb: Any | None = None, s3: Any | None = None, 
     if dynamodb is None or s3 is None or bedrock is None or stepfunctions is None:
         import boto3  # pragma: no cover - supplied by Lambda
         dynamodb = dynamodb or boto3.resource("dynamodb")
-        s3 = s3 or boto3.client("s3")
+        from botocore.config import Config
+        s3 = s3 or boto3.client("s3", config=Config(signature_version="s3v4", s3={"addressing_style": "virtual"}))
         bedrock = bedrock or boto3.client("bedrock-runtime")
         stepfunctions = stepfunctions or boto3.client("stepfunctions")
     from .quota import DynamoQuota

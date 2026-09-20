@@ -112,3 +112,35 @@ def test_playback_url_is_private_and_expired_recording_is_unavailable(monkeypatc
     assert s3.presigns[-1][2] == 900
     expired = get_reflection(event(), None, repo, s3, datetime(2026, 10, 19, tzinfo=timezone.utc))
     assert json.loads(expired['body']) == {'reflection': None}
+
+
+def test_presigned_audio_uses_regional_sigv4_without_browser_redirect(monkeypatch):
+    from urllib.parse import urlparse, parse_qs
+    from backend.reflection import _dependencies
+    monkeypatch.setenv('AWS_DEFAULT_REGION', 'ap-southeast-2')
+    monkeypatch.setenv('AWS_ACCESS_KEY_ID', 'testing')
+    monkeypatch.setenv('AWS_SECRET_ACCESS_KEY', 'testing')
+    _, client = _dependencies(FakeRepository(), None)
+    url = client.generate_presigned_url('put_object', Params={
+        'Bucket': 'example-compile-reflections', 'Key': 'test.audio', 'ContentType': 'audio/webm'}, ExpiresIn=900)
+    parsed = urlparse(url)
+    assert parsed.hostname == 'example-compile-reflections.s3.ap-southeast-2.amazonaws.com'
+    assert parse_qs(parsed.query)['X-Amz-Algorithm'] == ['AWS4-HMAC-SHA256']
+
+
+def test_playback_url_cannot_outlive_recording_retention(monkeypatch):
+    from backend.reflection import get_reflection
+    monkeypatch.setenv('REFLECTION_BUCKET', 'private-reflections')
+    repo, s3 = FakeRepository(), FakeS3()
+    create_reflection(event(), None, repo, s3, datetime(2026, 9, 18, tzinfo=timezone.utc))
+    get_reflection(event(), None, repo, s3, datetime(2026, 10, 17, 23, 59, tzinfo=timezone.utc))
+    assert s3.presigns[-1][2] == 60
+
+
+def test_expired_metadata_does_not_require_replacement_confirmation(monkeypatch):
+    monkeypatch.setenv('REFLECTION_BUCKET', 'private-reflections')
+    repo, s3 = FakeRepository(), FakeS3()
+    create_reflection(event(), None, repo, s3, datetime(2026, 9, 18, tzinfo=timezone.utc))
+    result = create_reflection(event(), None, repo, s3, datetime(2026, 10, 19, tzinfo=timezone.utc))
+    assert result['statusCode'] == 201
+    assert len(s3.deleted) == 1

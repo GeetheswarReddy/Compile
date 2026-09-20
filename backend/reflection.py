@@ -77,7 +77,8 @@ def _dependencies(repository: Any | None, s3: Any | None) -> tuple[Any, Any]:
             import boto3
         except ImportError as exc:  # pragma: no cover - Lambda supplies boto3.
             raise RuntimeError("boto3 is required in the Lambda runtime") from exc
-        s3 = boto3.client("s3")
+        from botocore.config import Config
+        s3 = boto3.client("s3", config=Config(signature_version="s3v4", s3={"addressing_style": "virtual"}))
     return repository, s3
 
 
@@ -111,10 +112,14 @@ def create_reflection(
             raise ValueError("contentType must be audio")
         repository, s3 = _dependencies(repository, s3)
         existing = repository.get(learner_id, question_id)
-        if existing is not None and body.get("confirmReplacement") is not True:
+        current = _now(now)
+        existing_is_live = existing is not None and (
+            not existing.get("expiresAt")
+            or datetime.fromisoformat(existing["expiresAt"]) > current
+        )
+        if existing_is_live and body.get("confirmReplacement") is not True:
             return _response(409, {"error": "replacement requires confirmReplacement=true"})
 
-        current = _now(now)
         expires_at = current + REFLECTION_TTL
         bucket = os.environ.get("REFLECTION_BUCKET") or os.environ.get("S3_BUCKET")
         if not bucket:
@@ -173,9 +178,14 @@ def get_reflection(event, context, repository=None, s3=None, now=None):
         learner_id, question_id, _ = _request_values(event)
         repository, s3 = _dependencies(repository, s3)
         record = repository.get(learner_id, question_id)
-        if not record or datetime.fromisoformat(record["expiresAt"]) <= _now(now):
+        current = _now(now)
+        if not record or datetime.fromisoformat(record["expiresAt"]) <= current:
             return _response(200, {"reflection": None})
-        url = s3.generate_presigned_url("get_object", Params={"Bucket": os.environ["REFLECTION_BUCKET"], "Key": record["s3Key"]}, ExpiresIn=PRESIGNED_URL_EXPIRY_SECONDS)
+        remaining = max(1, min(
+            PRESIGNED_URL_EXPIRY_SECONDS,
+            int((datetime.fromisoformat(record["expiresAt"]) - current).total_seconds()),
+        ))
+        url = s3.generate_presigned_url("get_object", Params={"Bucket": os.environ["REFLECTION_BUCKET"], "Key": record["s3Key"]}, ExpiresIn=remaining)
         return _response(200, {"reflection": {"playbackUrl": url, "expiresAt": record["expiresAt"], "contentType": record["contentType"]}})
     except ValueError as exc:
         return _response(400, {"error": str(exc)})
