@@ -335,6 +335,16 @@
   background: var(--color-surface-muted);
 }
 
+.practice-check-help {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0 var(--space-4) var(--space-3);
+  color: var(--color-text-subtle);
+  background: var(--color-surface);
+  font-size: 0.74rem;
+  line-height: 1.45;
+}
+
 .practice-verdict {
   max-height: min(34%, 16rem);
   flex: 0 1 auto;
@@ -347,13 +357,26 @@
 
 .practice-verdict h2 {
   margin: 0;
-  font-size: 0.98rem;
+  font-size: 1rem;
 }
 
 .practice-verdict p {
   margin: var(--space-2) 0;
   color: inherit;
   font-size: 0.8rem;
+}
+
+.practice-verdict .practice-verdict__label {
+  margin: 0 0 var(--space-1);
+  color: inherit;
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.practice-verdict .practice-verdict__summary {
+  color: var(--color-text-muted);
 }
 
 .practice-verdict.is-pass {

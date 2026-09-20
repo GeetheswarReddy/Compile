@@ -1,5 +1,5 @@
 import React, { useEffect, useId, useRef } from 'react';
-import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
+import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import {
   bracketMatching,
   HighlightStyle,
@@ -72,9 +72,9 @@ function lockedExtensions({ disabled, label, readOnly }) {
 /**
  * Controlled Python editor used by PracticeScreen.
  *
- * Tab intentionally keeps its browser behavior so keyboard users can leave
- * the editor. Enter applies Python-aware indentation, and undo/redo use the
- * platform's standard shortcuts.
+ * Tab and Shift+Tab indent/outdent like a coding IDE. Pressing Escape before
+ * Tab temporarily restores browser focus navigation. Enter applies
+ * Python-aware indentation, and undo/redo use the platform shortcuts.
  */
 export default function CodeEditor({ value, onChange, readOnly = false, disabled = false }) {
   const editorHostRef = useRef(null);
@@ -105,6 +105,7 @@ export default function CodeEditor({ value, onChange, readOnly = false, disabled
           highlightActiveLine(),
           keymap.of([
             { key: 'Enter', run: insertPythonIndentedNewline },
+            indentWithTab,
             ...defaultKeymap,
             ...historyKeymap,
           ]),
@@ -156,7 +157,7 @@ export default function CodeEditor({ value, onChange, readOnly = false, disabled
       <header className="practice-editor__toolbar">
         <span className="practice-editor__label">Solution</span>
         <span className="practice-editor__language">Python</span>
-        <span className="practice-editor__key-help" id={descriptionId}>Tab moves focus</span>
+        <span className="practice-editor__key-help" id={descriptionId}>Tab indents · Esc then Tab moves focus</span>
       </header>
       <div className="practice-editor__mount" ref={editorHostRef} />
       {locked && (

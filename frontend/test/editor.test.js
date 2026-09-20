@@ -108,7 +108,25 @@ test('CodeMirror controls practice code, applies Python indentation, and accepts
     assert.equal(content.getAttribute('contenteditable'), 'true');
     assert.ok(app.window.document.querySelector('.cm-lineNumbers'));
     assert.equal(app.window.document.querySelector('.practice-editor__language').textContent, 'Python');
-    assert.equal(app.window.document.querySelector('.practice-editor__key-help').textContent, 'Tab moves focus');
+    assert.equal(app.window.document.querySelector('.practice-editor__key-help').textContent, 'Tab indents · Esc then Tab moves focus');
+
+    const passPosition = view.state.doc.toString().indexOf('pass');
+    view.dispatch({ selection: { anchor: passPosition } });
+    content.dispatchEvent(new app.window.KeyboardEvent('keydown', {
+      bubbles: true,
+      cancelable: true,
+      code: 'Tab',
+      key: 'Tab',
+    }));
+    assert.equal(view.state.doc.toString(), 'def solve(values):\n        pass');
+    content.dispatchEvent(new app.window.KeyboardEvent('keydown', {
+      bubbles: true,
+      cancelable: true,
+      code: 'Tab',
+      key: 'Tab',
+      shiftKey: true,
+    }));
+    assert.equal(view.state.doc.toString(), 'def solve(values):\n    pass');
 
     const header = 'def solve(values):';
     view.dispatch({ selection: { anchor: header.length } });

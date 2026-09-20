@@ -104,9 +104,19 @@ export default function PracticeScreen({
               <button type="button" className="practice-secondary" onClick={practice.loadQuestion} disabled={loading || generating || submitting || !verdict}>Next question</button>
             </div>
 
+            {!verdict && !submitting && (
+              <p className="practice-check-help">Run &amp; Check executes your code against the question tests and shows whether it is correct.</p>
+            )}
+
             {verdict && (
               <section className={`practice-verdict ${verdict.passed ? 'is-pass' : 'is-fail'}`} aria-live="polite">
-                <h2>{verdict.passed ? 'Passed' : 'Not quite yet'}</h2>
+                <p className="practice-verdict__label">Test result</p>
+                <h2>{verdict.passed ? 'Passed — your code is correct' : 'Not quite yet — some tests failed'}</h2>
+                <p className="practice-verdict__summary">
+                  {verdict.passed
+                    ? 'Your solution produced the expected output.'
+                    : 'Update your code and use Run & Check again.'}
+                </p>
                 {!verdict.passed && verdict.failedCases.length > 0 && (
                   <div>
                     <p>Here are up to two cases to help you debug:</p>
